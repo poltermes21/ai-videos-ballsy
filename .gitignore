@@ -25,3 +25,7 @@ npm-debug.log*
 # Local Claude Code config and private project notes — not for the public repo.
 .claude
 PROJECT_SUMMARY.md
+
+# Test TTS audio + derived lip-sync data — regenerable, and ElevenLabs free-tier
+# audio has no commercial rights, so it shouldn't be committed.
+public/audio/

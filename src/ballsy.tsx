@@ -1,6 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {
   AbsoluteFill,
+  Audio,
   continueRender,
   delayRender,
   staticFile,
@@ -20,30 +21,84 @@ type LoadedRive = {
   artboard: Artboard;
   stateMachine: StateMachineInstance;
   visemeInput: SMIInput;
+  expressionInput: SMIInput;
+};
+
+type MouthCue = {
+  start: number;
+  end: number;
+  value: string;
 };
 
 const VISEME_INPUT_NAME = 'viseme';
+const EXPRESSION_INPUT_NAME = 'expression';
 
-// Dummy cycle to prove the Rive state machine can be driven per-frame from
-// Remotion, before wiring real Rhubarb output (see project_summary.MD step 5).
-const dummyVisemeForFrame = (frame: number) => Math.floor(frame / 5) % 9;
+// Dummy test cycle for step 7 — cycles through the 5 expressions on a fixed
+// timer, independent of any real script data (that comes in step 8).
+const EXPRESSION_NAMES = [
+  'neutral',
+  'excited',
+  'angry',
+  'disappointed',
+  'surprised',
+];
+const FRAMES_PER_EXPRESSION = 24;
+
+// Rhubarb's Preston Blair shapes (A-H, X for silence) mapped to Ballsy's
+// 9 viseme timelines (see project_summary.MD step 6).
+const RHUBARB_TO_VISEME: Record<string, number> = {
+  X: 0, // rest / silence
+  D: 1, // AI — wide open
+  C: 2, // E — open (EH/AE)
+  E: 3, // O — rounded open (AO/ER)
+  F: 4, // U — puckered (UW/OW/W)
+  A: 5, // MBP — closed
+  G: 6, // FV — teeth on lip
+  H: 7, // L — tongue up
+  B: 8, // etc — other consonants
+};
+
+const findViseme = (
+  mouthCues: MouthCue[],
+  timeSeconds: number,
+): {index: number; letter: string} => {
+  for (const cue of mouthCues) {
+    if (timeSeconds >= cue.start && timeSeconds < cue.end) {
+      return {index: RHUBARB_TO_VISEME[cue.value] ?? 0, letter: cue.value};
+    }
+  }
+  return {index: 0, letter: 'X'};
+};
 
 export const Ballsy: React.FC = () => {
   const frame = useCurrentFrame();
   const {width, height, fps} = useVideoConfig();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [handle] = useState(() => delayRender('Loading ballsy.riv'));
+  const [handle] = useState(() =>
+    delayRender('Loading ballsy.riv + lip-sync data'),
+  );
   const loadedRef = useRef<LoadedRive | null>(null);
+  const mouthCuesRef = useRef<MouthCue[]>([]);
   const lastFrameRef = useRef(0);
   const [ready, setReady] = useState(false);
-  const [displayedViseme, setDisplayedViseme] = useState<number | null>(null);
+  const [debugInfo, setDebugInfo] = useState<{
+    letter: string;
+    index: number;
+    expressionIndex: number;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    Rive({
-      locateFile: () => 'https://unpkg.com/@rive-app/canvas-advanced@2.31.5/rive.wasm',
-    }).then(async (riveCanvas) => {
+    Promise.all([
+      Rive({
+        locateFile: () =>
+          'https://unpkg.com/@rive-app/canvas-advanced@2.31.5/rive.wasm',
+      }),
+      fetch(staticFile('audio/test-phrase.json')).then(
+        (res) => res.json() as Promise<{mouthCues: MouthCue[]}>,
+      ),
+    ]).then(async ([riveCanvas, lipSyncData]) => {
       const buffer = await fetch(staticFile('ballsy.riv')).then((res) =>
         res.arrayBuffer(),
       );
@@ -55,12 +110,15 @@ export const Ballsy: React.FC = () => {
       );
 
       let visemeInput: SMIInput | null = null;
+      let expressionInput: SMIInput | null = null;
       for (let i = 0; i < stateMachine.inputCount(); i++) {
         const input = stateMachine.input(i);
         if (input.name === VISEME_INPUT_NAME) {
           // The generic SMIInput wrapper's `.value` setter is a no-op until
           // downcast to the concrete typed accessor.
           visemeInput = input.asNumber();
+        } else if (input.name === EXPRESSION_INPUT_NAME) {
+          expressionInput = input.asNumber();
         }
       }
 
@@ -71,11 +129,25 @@ export const Ballsy: React.FC = () => {
         );
       }
 
+      if (!expressionInput) {
+        throw new Error(
+          `No "${EXPRESSION_INPUT_NAME}" input found on the state machine. ` +
+            'Check the input name in the Rive editor.',
+        );
+      }
+
       if (cancelled) {
         return;
       }
 
-      loadedRef.current = {riveCanvas, artboard, stateMachine, visemeInput};
+      loadedRef.current = {
+        riveCanvas,
+        artboard,
+        stateMachine,
+        visemeInput,
+        expressionInput,
+      };
+      mouthCuesRef.current = lipSyncData.mouthCues;
       setReady(true);
       continueRender(handle);
     });
@@ -91,16 +163,23 @@ export const Ballsy: React.FC = () => {
       return;
     }
 
-    const {riveCanvas, artboard, stateMachine, visemeInput} = loadedRef.current;
+    const {riveCanvas, artboard, stateMachine, visemeInput, expressionInput} =
+      loadedRef.current;
 
     if (canvasRef.current.width !== width || canvasRef.current.height !== height) {
       canvasRef.current.width = width;
       canvasRef.current.height = height;
     }
 
-    const targetViseme = dummyVisemeForFrame(frame);
-    visemeInput.value = targetViseme;
-    setDisplayedViseme(targetViseme);
+    const timeSeconds = frame / fps;
+    const {index, letter} = findViseme(mouthCuesRef.current, timeSeconds);
+    visemeInput.value = index;
+
+    const expressionIndex =
+      Math.floor(frame / FRAMES_PER_EXPRESSION) % EXPRESSION_NAMES.length;
+    expressionInput.value = expressionIndex;
+
+    setDebugInfo({letter, index, expressionIndex});
 
     const diffSeconds = Math.max(frame - lastFrameRef.current, 0) / fps;
     stateMachine.advanceAndApply(diffSeconds);
@@ -124,8 +203,9 @@ export const Ballsy: React.FC = () => {
 
   return (
     <AbsoluteFill>
+      <Audio src={staticFile('audio/test-phrase.mp3')} />
       <canvas ref={canvasRef} width={width} height={height} />
-      {/* TEMP debug overlay for step 5 — remove once viseme wiring is confirmed */}
+      {/* TEMP debug overlay for step 6 — remove once lip-sync wiring is confirmed */}
       <div
         style={{
           position: 'absolute',
@@ -138,8 +218,13 @@ export const Ballsy: React.FC = () => {
           fontSize: 20,
         }}
       >
-        frame {frame} → viseme {displayedViseme ?? '-'}
+        frame {frame} | t={timeSecondsLabel(frame, fps)}s | rhubarb=
+        {debugInfo?.letter ?? '-'} → viseme {debugInfo?.index ?? '-'} | expression{' '}
+        {EXPRESSION_NAMES[debugInfo?.expressionIndex ?? 0]} (
+        {debugInfo?.expressionIndex ?? '-'})
       </div>
     </AbsoluteFill>
   );
 };
+
+const timeSecondsLabel = (frame: number, fps: number) => (frame / fps).toFixed(2);
