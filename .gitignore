@@ -29,3 +29,6 @@ PROJECT_SUMMARY.md
 # Test TTS audio + derived lip-sync data — regenerable, and ElevenLabs free-tier
 # audio has no commercial rights, so it shouldn't be committed.
 public/audio/
+
+# Generated match scripts — regenerable test/review output, not source.
+scripts/output/
