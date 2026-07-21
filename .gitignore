@@ -26,7 +26,6 @@ npm-debug.log*
 .claude
 .agents
 skills-lock.json
-PROJECT_SUMMARY.md
 
 # Test TTS audio + derived lip-sync data — regenerable, and ElevenLabs free-tier
 # audio has no commercial rights, so it shouldn't be committed.
