@@ -24,6 +24,8 @@ npm-debug.log*
 
 # Local Claude Code config and private project notes — not for the public repo.
 .claude
+.agents
+skills-lock.json
 PROJECT_SUMMARY.md
 
 # Test TTS audio + derived lip-sync data — regenerable, and ElevenLabs free-tier

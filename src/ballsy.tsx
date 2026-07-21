@@ -4,6 +4,9 @@ import {
   Audio,
   continueRender,
   delayRender,
+  Easing,
+  interpolate,
+  Sequence,
   staticFile,
   useCurrentFrame,
   useVideoConfig,
@@ -15,6 +18,7 @@ import type {
   SMIInput,
   StateMachineInstance,
 } from '@rive-app/canvas-advanced';
+import {GoalGraphic} from './graphics/GoalGraphic';
 
 type LoadedRive = {
   riveCanvas: RiveCanvas;
@@ -30,11 +34,40 @@ type MouthCue = {
   value: string;
 };
 
+type ExpressionCue = {
+  start: number;
+  end: number;
+  expression: string;
+};
+
+type GraphicsEntry = {
+  type: 'goal';
+  startTime: number;
+  props: {
+    homeTeam: string;
+    awayTeam: string;
+    homeScore: number;
+    awayScore: number;
+    scoringTeam: 'home' | 'away';
+  };
+};
+
+type AvatarKeyframe = {
+  time: number;
+  scale: number;
+  x: number;
+  y: number;
+};
+
+// Must match FLOAT_SCALE in scripts/generate-avatar-timeline.mjs.
+const AVATAR_FLOAT_SCALE = 0.42;
+
 const VISEME_INPUT_NAME = 'viseme';
 const EXPRESSION_INPUT_NAME = 'expression';
 
-// Dummy test cycle for step 7 — cycles through the 5 expressions on a fixed
-// timer, independent of any real script data (that comes in step 8).
+// Test fixture until step 11 (frontend match selector) picks a real one.
+const FIXTURE_ID = '979138';
+
 const EXPRESSION_NAMES = [
   'neutral',
   'excited',
@@ -42,7 +75,9 @@ const EXPRESSION_NAMES = [
   'disappointed',
   'surprised',
 ];
-const FRAMES_PER_EXPRESSION = 24;
+const EXPRESSION_TO_INDEX: Record<string, number> = Object.fromEntries(
+  EXPRESSION_NAMES.map((name, index) => [name, index]),
+);
 
 // Rhubarb's Preston Blair shapes (A-H, X for silence) mapped to Ballsy's
 // 9 viseme timelines (see project_summary.MD step 6).
@@ -70,6 +105,18 @@ const findViseme = (
   return {index: 0, letter: 'X'};
 };
 
+const findExpression = (
+  expressionCues: ExpressionCue[],
+  timeSeconds: number,
+): {index: number; name: string} => {
+  for (const cue of expressionCues) {
+    if (timeSeconds >= cue.start && timeSeconds < cue.end) {
+      return {index: EXPRESSION_TO_INDEX[cue.expression] ?? 0, name: cue.expression};
+    }
+  }
+  return {index: 0, name: 'neutral'};
+};
+
 export const Ballsy: React.FC = () => {
   const frame = useCurrentFrame();
   const {width, height, fps} = useVideoConfig();
@@ -79,12 +126,15 @@ export const Ballsy: React.FC = () => {
   );
   const loadedRef = useRef<LoadedRive | null>(null);
   const mouthCuesRef = useRef<MouthCue[]>([]);
+  const expressionCuesRef = useRef<ExpressionCue[]>([]);
   const lastFrameRef = useRef(0);
   const [ready, setReady] = useState(false);
+  const [graphicsTimeline, setGraphicsTimeline] = useState<GraphicsEntry[]>([]);
+  const [avatarKeyframes, setAvatarKeyframes] = useState<AvatarKeyframe[]>([]);
   const [debugInfo, setDebugInfo] = useState<{
     letter: string;
-    index: number;
-    expressionIndex: number;
+    visemeIndex: number;
+    expressionName: string;
   } | null>(null);
 
   useEffect(() => {
@@ -95,10 +145,19 @@ export const Ballsy: React.FC = () => {
         locateFile: () =>
           'https://unpkg.com/@rive-app/canvas-advanced@2.31.5/rive.wasm',
       }),
-      fetch(staticFile('audio/test-phrase.json')).then(
+      fetch(staticFile(`audio/${FIXTURE_ID}-visemes.json`)).then(
         (res) => res.json() as Promise<{mouthCues: MouthCue[]}>,
       ),
-    ]).then(async ([riveCanvas, lipSyncData]) => {
+      fetch(staticFile(`audio/${FIXTURE_ID}-expressions.json`)).then(
+        (res) => res.json() as Promise<{expressionCues: ExpressionCue[]}>,
+      ),
+      fetch(staticFile(`audio/${FIXTURE_ID}-graphics.json`)).then(
+        (res) => res.json() as Promise<{graphicsTimeline: GraphicsEntry[]}>,
+      ),
+      fetch(staticFile(`audio/${FIXTURE_ID}-avatar.json`)).then(
+        (res) => res.json() as Promise<{keyframes: AvatarKeyframe[]}>,
+      ),
+    ]).then(async ([riveCanvas, lipSyncData, expressionData, graphicsData, avatarData]) => {
       const buffer = await fetch(staticFile('ballsy.riv')).then((res) =>
         res.arrayBuffer(),
       );
@@ -148,6 +207,9 @@ export const Ballsy: React.FC = () => {
         expressionInput,
       };
       mouthCuesRef.current = lipSyncData.mouthCues;
+      expressionCuesRef.current = expressionData.expressionCues;
+      setGraphicsTimeline(graphicsData.graphicsTimeline);
+      setAvatarKeyframes(avatarData.keyframes);
       setReady(true);
       continueRender(handle);
     });
@@ -172,14 +234,16 @@ export const Ballsy: React.FC = () => {
     }
 
     const timeSeconds = frame / fps;
-    const {index, letter} = findViseme(mouthCuesRef.current, timeSeconds);
-    visemeInput.value = index;
+    const {index: visemeIndex, letter} = findViseme(mouthCuesRef.current, timeSeconds);
+    visemeInput.value = visemeIndex;
 
-    const expressionIndex =
-      Math.floor(frame / FRAMES_PER_EXPRESSION) % EXPRESSION_NAMES.length;
+    const {index: expressionIndex, name: expressionName} = findExpression(
+      expressionCuesRef.current,
+      timeSeconds,
+    );
     expressionInput.value = expressionIndex;
 
-    setDebugInfo({letter, index, expressionIndex});
+    setDebugInfo({letter, visemeIndex, expressionName});
 
     const diffSeconds = Math.max(frame - lastFrameRef.current, 0) / fps;
     stateMachine.advanceAndApply(diffSeconds);
@@ -201,11 +265,71 @@ export const Ballsy: React.FC = () => {
     lastFrameRef.current = frame;
   }, [frame, ready, width, height, fps]);
 
+  const timeSeconds = frame / fps;
+  const avatarTimes = avatarKeyframes.map((k) => k.time);
+  const avatarScaleValues = avatarKeyframes.map((k) => k.scale);
+  const avatarXValues = avatarKeyframes.map((k) => k.x);
+  const avatarYValues = avatarKeyframes.map((k) => k.y);
+
+  const avatarEasing = Easing.bezier(0.33, 1, 0.68, 1);
+  const baseScale =
+    avatarTimes.length > 0
+      ? interpolate(timeSeconds, avatarTimes, avatarScaleValues, {
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+          easing: avatarEasing,
+        })
+      : 1;
+  const baseX =
+    avatarTimes.length > 0
+      ? interpolate(timeSeconds, avatarTimes, avatarXValues, {
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+          easing: avatarEasing,
+        })
+      : 0;
+  const baseY =
+    avatarTimes.length > 0
+      ? interpolate(timeSeconds, avatarTimes, avatarYValues, {
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+          easing: avatarEasing,
+        })
+      : 0;
+
+  // Fades in/out with the scale transition, so the organic bob only shows up
+  // while actually floating (not during the big & centered hook/outro).
+  const floatingAmount = interpolate(baseScale, [AVATAR_FLOAT_SCALE, 1], [1, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+  const bobX = Math.sin((timeSeconds * 2 * Math.PI) / 2.6) * 14 * floatingAmount;
+  const bobY = Math.sin((timeSeconds * 2 * Math.PI) / 3.1 + 1) * 10 * floatingAmount;
+  const bobScale = Math.sin((timeSeconds * 2 * Math.PI) / 4) * 0.03 * floatingAmount;
+
+  const avatarScale = baseScale + bobScale;
+  const avatarX = baseX * width + bobX;
+  const avatarY = baseY * height + bobY;
+
   return (
     <AbsoluteFill>
-      <Audio src={staticFile('audio/test-phrase.mp3')} />
-      <canvas ref={canvasRef} width={width} height={height} />
-      {/* TEMP debug overlay for step 6 — remove once lip-sync wiring is confirmed */}
+      <Audio src={staticFile(`audio/${FIXTURE_ID}.mp3`)} />
+      <div
+        style={{
+          position: 'absolute',
+          width,
+          height,
+          translate: `${avatarX}px ${avatarY}px`,
+          scale: avatarScale,
+        }}
+      >
+        <canvas ref={canvasRef} width={width} height={height} />
+      </div>
+      {graphicsTimeline.map((entry, i) => (
+        <Sequence key={i} from={Math.round(entry.startTime * fps)} durationInFrames={90}>
+          <GoalGraphic {...entry.props} />
+        </Sequence>
+      ))}
       <div
         style={{
           position: 'absolute',
@@ -219,9 +343,8 @@ export const Ballsy: React.FC = () => {
         }}
       >
         frame {frame} | t={timeSecondsLabel(frame, fps)}s | rhubarb=
-        {debugInfo?.letter ?? '-'} → viseme {debugInfo?.index ?? '-'} | expression{' '}
-        {EXPRESSION_NAMES[debugInfo?.expressionIndex ?? 0]} (
-        {debugInfo?.expressionIndex ?? '-'})
+        {debugInfo?.letter ?? '-'} viseme {debugInfo?.visemeIndex ?? '-'} | expression{' '}
+        {debugInfo?.expressionName ?? '-'}
       </div>
     </AbsoluteFill>
   );
