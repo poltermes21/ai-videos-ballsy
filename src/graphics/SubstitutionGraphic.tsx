@@ -1,5 +1,6 @@
 import React from 'react';
-import {AbsoluteFill, Easing, Interactive, interpolate, useCurrentFrame} from 'remotion';
+import {AbsoluteFill, Easing, Img, Interactive, interpolate, staticFile, useCurrentFrame} from 'remotion';
+import {COLORS, TitlePill} from './shared';
 
 type SubstitutionGraphicProps = {
   playerOnName: string;
@@ -8,15 +9,33 @@ type SubstitutionGraphicProps = {
   playerOffNumber: number;
 };
 
-const GREEN = '#22C55E';
-const RED = '#FF3B3B';
-
-const Badge: React.FC<{color: string; number: number; name: string}> = ({color, number, name}) => (
-  <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10}}>
+const Badge: React.FC<{color: string; tag: string; number: number; name: string; scale: number}> = ({
+  color,
+  tag,
+  number,
+  name,
+  scale,
+}) => (
+  <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, scale: `${scale}`}}>
     <div
       style={{
-        width: 118,
-        height: 118,
+        background: color,
+        borderRadius: 8,
+        padding: '3px 16px',
+        color: 'white',
+        fontFamily: '"Arial Black", sans-serif',
+        fontSize: 24,
+        letterSpacing: 3,
+        border: '3px solid black',
+        WebkitTextStroke: '1px black',
+      }}
+    >
+      {tag}
+    </div>
+    <div
+      style={{
+        width: 120,
+        height: 120,
         borderRadius: '50%',
         background: color,
         border: '7px solid black',
@@ -41,7 +60,7 @@ const Badge: React.FC<{color: string; number: number; name: string}> = ({color, 
         fontFamily: '"Arial Black", sans-serif',
         fontSize: 26,
         letterSpacing: 1,
-        maxWidth: 260,
+        maxWidth: 280,
         overflow: 'hidden',
         whiteSpace: 'nowrap',
         textOverflow: 'ellipsis',
@@ -52,38 +71,6 @@ const Badge: React.FC<{color: string; number: number; name: string}> = ({color, 
   </div>
 );
 
-// A single arrow drawn in SVG (400x400 viewBox). Points from tail to head.
-const Arrow: React.FC<{color: string; x1: number; y1: number; x2: number; y2: number}> = ({
-  color,
-  x1,
-  y1,
-  x2,
-  y2,
-}) => {
-  const id = `${color}-${x1}-${y1}`.replace(/[^a-zA-Z0-9]/g, '');
-  return (
-    <svg width={460} height={460} viewBox="0 0 400 400" style={{overflow: 'visible'}}>
-      <defs>
-        <marker id={id} markerWidth={5} markerHeight={5} refX={2.6} refY={2.5} orient="auto">
-          <path d="M0,0 L5,2.5 L0,5 Z" fill={color} stroke="black" strokeWidth={0.5} />
-        </marker>
-      </defs>
-      {/* black outline underlay */}
-      <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="black" strokeWidth={30} strokeLinecap="round" />
-      <line
-        x1={x1}
-        y1={y1}
-        x2={x2}
-        y2={y2}
-        stroke={color}
-        strokeWidth={18}
-        strokeLinecap="round"
-        markerEnd={`url(#${id})`}
-      />
-    </svg>
-  );
-};
-
 export const SubstitutionGraphic: React.FC<SubstitutionGraphicProps> = ({
   playerOnName,
   playerOnNumber,
@@ -92,32 +79,25 @@ export const SubstitutionGraphic: React.FC<SubstitutionGraphicProps> = ({
 }) => {
   const frame = useCurrentFrame();
 
-  // Green arrow (ON) rises up into place; red arrow (OFF) drops down into place.
-  const onOffset = interpolate(frame, [0, 22], [140, 0], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-    easing: Easing.spring({damping: 13, mass: 0.7}),
-  });
-  const onOpacity = interpolate(frame, [0, 14], [0, 1], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  });
-  const offOffset = interpolate(frame, [8, 30], [-140, 0], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-    easing: Easing.spring({damping: 13, mass: 0.7}),
-  });
-  const offOpacity = interpolate(frame, [8, 22], [0, 1], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  });
-
-  const onBadge = interpolate(frame, [26, 40], [0, 1], {
+  // Swap icon pops in and rotates a touch to feel alive.
+  const iconScale = interpolate(frame, [0, 20], [0, 1], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
     easing: Easing.spring({damping: 10}),
   });
-  const offBadge = interpolate(frame, [32, 46], [0, 1], {
+  const iconSpin = interpolate(frame, [0, 26], [-90, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+    easing: Easing.spring({damping: 11, mass: 0.7}),
+  });
+
+  // OUT badge lands first, then IN.
+  const offBadge = interpolate(frame, [14, 28], [0, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+    easing: Easing.spring({damping: 10}),
+  });
+  const onBadge = interpolate(frame, [24, 38], [0, 1], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
     easing: Easing.spring({damping: 10}),
@@ -125,85 +105,24 @@ export const SubstitutionGraphic: React.FC<SubstitutionGraphicProps> = ({
 
   return (
     <AbsoluteFill>
-      <Interactive.Div
-        name="Substitution title"
-        style={{
-          position: 'absolute',
-          top: '11%',
-          left: '50%',
-          translate: '-50%',
-        }}
-      >
-        <div
-          style={{
-            background: 'black',
-            border: '4px solid white',
-            borderRadius: 999,
-            padding: '10px 40px',
-            color: 'white',
-            fontFamily: '"Arial Black", sans-serif',
-            fontSize: 42,
-            letterSpacing: 4,
-          }}
-        >
-          SUBSTITUTION
-        </div>
+      <Interactive.Div name="Substitution title" style={{position: 'absolute', top: '9%', left: '50%', translate: '-50%'}}>
+        <TitlePill text="SUBSTITUTION" fontSize={42} />
       </Interactive.Div>
 
-      {/* Green ON arrow: tail bottom-right -> head top-left */}
+      {/* Swap icon (the reference image) */}
       <Interactive.Div
-        name="Arrow on"
-        style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          translate: `-50% calc(-50% + ${onOffset}px)`,
-          opacity: onOpacity,
-        }}
+        name="Swap icon"
+        style={{position: 'absolute', top: '34%', left: '50%', translate: '-50%', scale: iconScale, rotate: `${iconSpin}deg`}}
       >
-        <Arrow color={GREEN} x1={252} y1={330} x2={150} y2={72} />
+        <Img src={staticFile('substitution.png')} style={{width: 240, height: 240}} />
       </Interactive.Div>
 
-      {/* Red OFF arrow: tail top-right -> head bottom-left */}
-      <Interactive.Div
-        name="Arrow off"
-        style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          translate: `-50% calc(-50% + ${offOffset}px)`,
-          opacity: offOpacity,
-        }}
-      >
-        <Arrow color={RED} x1={252} y1={72} x2={150} y2={330} />
+      {/* Badges: OUT (red) on the left, IN (green) on the right */}
+      <Interactive.Div name="Player off badge" style={{position: 'absolute', top: '62%', left: '29%', translate: '-50%'}}>
+        <Badge color={COLORS.red} tag="OUT" number={playerOffNumber} name={playerOffName} scale={offBadge} />
       </Interactive.Div>
-
-      {/* ON badge near the green arrowhead (upper-left) */}
-      <Interactive.Div
-        name="Player on badge"
-        style={{
-          position: 'absolute',
-          top: '31%',
-          left: '32%',
-          translate: '-50%',
-          scale: onBadge,
-        }}
-      >
-        <Badge color={GREEN} number={playerOnNumber} name={playerOnName} />
-      </Interactive.Div>
-
-      {/* OFF badge near the red arrowhead (lower-left) */}
-      <Interactive.Div
-        name="Player off badge"
-        style={{
-          position: 'absolute',
-          top: '69%',
-          left: '32%',
-          translate: '-50%',
-          scale: offBadge,
-        }}
-      >
-        <Badge color={RED} number={playerOffNumber} name={playerOffName} />
+      <Interactive.Div name="Player on badge" style={{position: 'absolute', top: '62%', left: '71%', translate: '-50%'}}>
+        <Badge color={COLORS.green} tag="IN" number={playerOnNumber} name={playerOnName} scale={onBadge} />
       </Interactive.Div>
     </AbsoluteFill>
   );

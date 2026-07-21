@@ -63,15 +63,40 @@ export const RemotionRoot: React.FC = () => {
         }}
       />
       <Composition
-        id="PenaltyGraphicTest"
+        id="PenaltyScoredTest"
         component={PenaltyGraphic}
         durationInFrames={100}
         fps={30}
         width={1080}
         height={1080}
-        defaultProps={{
-          outcome: "scored" as const,
-        }}
+        defaultProps={{ outcome: "scored" as const }}
+      />
+      <Composition
+        id="PenaltySavedTest"
+        component={PenaltyGraphic}
+        durationInFrames={100}
+        fps={30}
+        width={1080}
+        height={1080}
+        defaultProps={{ outcome: "saved" as const }}
+      />
+      <Composition
+        id="PenaltyPostTest"
+        component={PenaltyGraphic}
+        durationInFrames={100}
+        fps={30}
+        width={1080}
+        height={1080}
+        defaultProps={{ outcome: "post" as const }}
+      />
+      <Composition
+        id="PenaltyOutTest"
+        component={PenaltyGraphic}
+        durationInFrames={100}
+        fps={30}
+        width={1080}
+        height={1080}
+        defaultProps={{ outcome: "out" as const }}
       />
       <Composition
         id="SubstitutionGraphicTest"
@@ -88,15 +113,22 @@ export const RemotionRoot: React.FC = () => {
         }}
       />
       <Composition
-        id="ClearChanceGraphicTest"
+        id="ClearChancePostTest"
         component={ClearChanceGraphic}
         durationInFrames={100}
         fps={30}
         width={1080}
         height={1080}
-        defaultProps={{
-          outcome: "post" as const,
-        }}
+        defaultProps={{ outcome: "post" as const }}
+      />
+      <Composition
+        id="ClearChanceWideTest"
+        component={ClearChanceGraphic}
+        durationInFrames={100}
+        fps={30}
+        width={1080}
+        height={1080}
+        defaultProps={{ outcome: "wide" as const }}
       />
       <Composition
         id="VarReviewGraphicTest"

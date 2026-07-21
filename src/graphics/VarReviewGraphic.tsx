@@ -1,6 +1,10 @@
 import React from 'react';
 import {AbsoluteFill, Easing, Interactive, interpolate, useCurrentFrame} from 'remotion';
+import {COLORS, TitlePill} from './shared';
 
+// Redrawn (not the watermarked stock PNG) in the same iconic style: a
+// black-outlined TV monitor with big "VAR" letters, plus a scan sweep and a
+// blinking REC dot to signal a review in progress.
 export const VarReviewGraphic: React.FC = () => {
   const frame = useCurrentFrame();
 
@@ -10,36 +14,21 @@ export const VarReviewGraphic: React.FC = () => {
     easing: Easing.spring({damping: 11}),
   });
 
-  // Scanning line sweeps top -> bottom of the screen, looping.
-  const scanPeriod = 45;
-  const scanY = interpolate(frame % scanPeriod, [0, scanPeriod], [0, 320], {
-    extrapolateRight: 'clamp',
-  });
-
-  // Pulsing border glow.
-  const pulse = 0.5 + 0.5 * Math.sin(frame / 5);
-
-  // Blinking "REC" dot.
+  // Scan line sweeps down the screen, looping.
+  const scanPeriod = 48;
+  const scanY = interpolate(frame % scanPeriod, [0, scanPeriod], [0, 300], {extrapolateRight: 'clamp'});
   const recOn = frame % 30 < 18;
-
-  // Animated ellipsis for "IN PROGRESS".
   const dots = '.'.repeat((Math.floor(frame / 12) % 3) + 1);
+
+  const SCREEN_W = 540;
+  const SCREEN_H = 340;
 
   return (
     <AbsoluteFill>
-      <Interactive.Div
-        name="VAR title"
-        style={{
-          position: 'absolute',
-          top: '16%',
-          left: '50%',
-          translate: '-50%',
-          scale: enter,
-        }}
-      >
+      <Interactive.Div name="VAR title" style={{position: 'absolute', top: '14%', left: '50%', translate: '-50%', scale: enter}}>
         <div
           style={{
-            background: '#FF3B3B',
+            background: COLORS.red,
             border: '4px solid black',
             padding: '10px 46px',
             boxShadow: '0 8px 0 rgba(0,0,0,0.25)',
@@ -55,140 +44,66 @@ export const VarReviewGraphic: React.FC = () => {
         </div>
       </Interactive.Div>
 
-      <Interactive.Div
-        name="Monitor"
-        style={{
-          position: 'absolute',
-          top: '34%',
-          left: '50%',
-          translate: '-50%',
-          scale: enter,
-        }}
-      >
-        <div
-          style={{
-            width: 560,
-            height: 360,
-            borderRadius: 24,
-            background: '#0B1220',
-            border: '10px solid black',
-            boxShadow: `0 0 ${20 + pulse * 40}px rgba(255,59,59,${0.4 + pulse * 0.6}), 0 16px 0 rgba(0,0,0,0.25)`,
-            overflow: 'hidden',
-            position: 'relative',
-          }}
-        >
-          {/* faint grid backdrop */}
+      <Interactive.Div name="Monitor" style={{position: 'absolute', top: '33%', left: '50%', translate: '-50%', scale: enter}}>
+        <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center'}}>
+          {/* Screen */}
           <div
             style={{
-              position: 'absolute',
-              inset: 0,
-              backgroundImage:
-                'linear-gradient(rgba(80,120,180,0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(80,120,180,0.18) 1px, transparent 1px)',
-              backgroundSize: '40px 40px',
-            }}
-          />
-
-          {/* scanning line */}
-          <div
-            style={{
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              top: `${scanY}px`,
-              height: 6,
-              background: '#38BDF8',
-              boxShadow: '0 0 24px 6px rgba(56,189,248,0.8)',
-            }}
-          />
-
-          {/* REC indicator */}
-          <div
-            style={{
-              position: 'absolute',
-              top: 18,
-              left: 18,
+              width: SCREEN_W,
+              height: SCREEN_H,
+              borderRadius: 10,
+              background: 'white',
+              border: '14px solid black',
+              boxShadow: '0 14px 0 rgba(0,0,0,0.25)',
+              overflow: 'hidden',
+              position: 'relative',
               display: 'flex',
               alignItems: 'center',
-              gap: 10,
+              justifyContent: 'center',
             }}
           >
-            <div
-              style={{
-                width: 20,
-                height: 20,
-                borderRadius: '50%',
-                background: '#FF3B3B',
-                opacity: recOn ? 1 : 0.15,
-              }}
-            />
+            {/* VAR text */}
             <span
               style={{
                 fontFamily: '"Arial Black", sans-serif',
-                fontSize: 24,
-                color: 'white',
-                letterSpacing: 2,
+                fontWeight: 900,
+                fontSize: 168,
+                letterSpacing: 6,
+                color: 'black',
+                lineHeight: 1,
               }}
             >
-              REC
+              VAR
             </span>
-          </div>
 
-          {/* centre reticle */}
-          <div
-            style={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              translate: '-50%',
-              width: 150,
-              height: 150,
-              borderRadius: '50%',
-              border: '4px dashed rgba(255,255,255,0.6)',
-              rotate: `${(frame * 2) % 360}deg`,
-            }}
-          />
-          <div
-            style={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              translate: '-50%',
-              width: 18,
-              height: 18,
-              borderRadius: '50%',
-              background: '#FFD23F',
-              border: '3px solid black',
-            }}
-          />
+            {/* scan line */}
+            <div
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                top: `${scanY}px`,
+                height: 8,
+                background: COLORS.cyan,
+                opacity: 0.85,
+                boxShadow: '0 0 22px 6px rgba(56,189,248,0.7)',
+              }}
+            />
+
+            {/* REC indicator */}
+            <div style={{position: 'absolute', top: 16, left: 16, display: 'flex', alignItems: 'center', gap: 10}}>
+              <div style={{width: 22, height: 22, borderRadius: '50%', background: COLORS.red, opacity: recOn ? 1 : 0.15}} />
+              <span style={{fontFamily: '"Arial Black", sans-serif', fontSize: 24, color: COLORS.red, letterSpacing: 2}}>REC</span>
+            </div>
+          </div>
+          {/* Stand */}
+          <div style={{width: 150, height: 26, background: 'black', clipPath: 'polygon(18% 0, 82% 0, 100% 100%, 0 100%)'}} />
+          <div style={{width: 220, height: 16, background: 'black', borderRadius: 6}} />
         </div>
       </Interactive.Div>
 
-      <Interactive.Div
-        name="Status text"
-        style={{
-          position: 'absolute',
-          top: '74%',
-          left: '50%',
-          translate: '-50%',
-          opacity: enter,
-        }}
-      >
-        <div
-          style={{
-            background: 'black',
-            border: '3px solid white',
-            borderRadius: 999,
-            padding: '10px 40px',
-            color: 'white',
-            fontFamily: '"Arial Black", sans-serif',
-            fontSize: 38,
-            letterSpacing: 2,
-            minWidth: 460,
-            textAlign: 'center',
-          }}
-        >
-          CHECKING{dots}
-        </div>
+      <Interactive.Div name="Status text" style={{position: 'absolute', top: '78%', left: '50%', translate: '-50%', opacity: enter}}>
+        <TitlePill text={`CHECKING${dots}`} fontSize={38} />
       </Interactive.Div>
     </AbsoluteFill>
   );
