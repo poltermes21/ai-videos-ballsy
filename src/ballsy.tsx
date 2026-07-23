@@ -19,6 +19,12 @@ import type {
   StateMachineInstance,
 } from '@rive-app/canvas-advanced';
 import {GoalGraphic} from './graphics/GoalGraphic';
+import {GoalDisallowedGraphic} from './graphics/GoalDisallowedGraphic';
+import {CardGraphic} from './graphics/CardGraphic';
+import {PenaltyGraphic} from './graphics/PenaltyGraphic';
+import {SubstitutionGraphic} from './graphics/SubstitutionGraphic';
+import {ClearChanceGraphic} from './graphics/ClearChanceGraphic';
+import {VarReviewGraphic} from './graphics/VarReviewGraphic';
 
 type LoadedRive = {
   riveCanvas: RiveCanvas;
@@ -40,17 +46,63 @@ type ExpressionCue = {
   expression: string;
 };
 
-type GraphicsEntry = {
-  type: 'goal';
-  startTime: number;
-  props: {
-    homeTeam: string;
-    awayTeam: string;
-    homeScore: number;
-    awayScore: number;
-    scoringTeam: 'home' | 'away';
-  };
+type ScoreProps = {
+  homeTeam: string;
+  awayTeam: string;
+  homeScore: number;
+  awayScore: number;
+  scoringTeam: 'home' | 'away';
 };
+
+// Discriminated union — one variant per event graphic. Shapes must match the
+// props emitted by scripts/generate-graphics-timeline.mjs.
+type GraphicsEntry = {startTime: number} & (
+  | {type: 'goal'; props: ScoreProps}
+  | {type: 'goalDisallowed'; props: ScoreProps}
+  | {type: 'card'; props: {cardType: 'yellow' | 'red'; minute: number}}
+  | {type: 'penalty'; props: {outcome: 'scored' | 'saved' | 'post' | 'out'}}
+  | {
+      type: 'substitution';
+      props: {
+        playerOnName: string;
+        playerOnNumber: number;
+        playerOffName: string;
+        playerOffNumber: number;
+      };
+    }
+  | {type: 'clearChance'; props: {outcome: 'post' | 'wide'}}
+  | {type: 'varReview'; props: Record<string, never>}
+);
+
+// Frames each graphic stays on screen (mirrors the test comps in Root.tsx).
+const GRAPHIC_DURATION: Record<GraphicsEntry['type'], number> = {
+  goal: 90,
+  goalDisallowed: 120,
+  card: 90,
+  penalty: 100,
+  substitution: 90,
+  clearChance: 100,
+  varReview: 150,
+};
+
+function renderGraphic(entry: GraphicsEntry) {
+  switch (entry.type) {
+    case 'goal':
+      return <GoalGraphic {...entry.props} />;
+    case 'goalDisallowed':
+      return <GoalDisallowedGraphic {...entry.props} />;
+    case 'card':
+      return <CardGraphic {...entry.props} />;
+    case 'penalty':
+      return <PenaltyGraphic {...entry.props} />;
+    case 'substitution':
+      return <SubstitutionGraphic {...entry.props} />;
+    case 'clearChance':
+      return <ClearChanceGraphic {...entry.props} />;
+    case 'varReview':
+      return <VarReviewGraphic />;
+  }
+}
 
 type AvatarKeyframe = {
   time: number;
@@ -326,8 +378,12 @@ export const Ballsy: React.FC = () => {
         <canvas ref={canvasRef} width={width} height={height} />
       </div>
       {graphicsTimeline.map((entry, i) => (
-        <Sequence key={i} from={Math.round(entry.startTime * fps)} durationInFrames={90}>
-          <GoalGraphic {...entry.props} />
+        <Sequence
+          key={i}
+          from={Math.round(entry.startTime * fps)}
+          durationInFrames={GRAPHIC_DURATION[entry.type]}
+        >
+          {renderGraphic(entry)}
         </Sequence>
       ))}
       <div

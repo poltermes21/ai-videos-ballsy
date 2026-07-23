@@ -49,3 +49,27 @@ export async function findWorldCupFixtureAndEvents(season = 2022, fromEnd = 1) {
 
   return {fixture, events: eventsResponse.response};
 }
+
+// Shirt numbers aren't on the events endpoint, so the substitution graphic
+// needs the lineups. Returns Map<playerId, {number, name}> across both teams'
+// starters and bench.
+export async function fetchFixtureLineups(fixtureId) {
+  const apiKey = process.env.API_FOOTBALL_KEY;
+  if (!apiKey) {
+    throw new Error('Missing API_FOOTBALL_KEY env var.');
+  }
+
+  const res = await apiGet(apiKey, `/fixtures/lineups?fixture=${fixtureId}`);
+  const byId = new Map();
+  for (const team of res.response) {
+    for (const group of [team.startXI ?? [], team.substitutes ?? []]) {
+      for (const entry of group) {
+        const player = entry.player;
+        if (player && player.id != null) {
+          byId.set(player.id, {number: player.number ?? null, name: player.name ?? null});
+        }
+      }
+    }
+  }
+  return byId;
+}

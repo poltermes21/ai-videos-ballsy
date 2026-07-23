@@ -356,12 +356,62 @@ match graphics.
        (0 when big & centered, 1 when floating) so it never jitters during
        the static hook/outro. Confirmed working: Ballsy shrinks into the
        correct zone per moment, no more collision with the event graphic.
-    3. **← YOU ARE HERE:** Add the remaining graphic types (card, penalty,
-       substitution, VAR review, clear chance) per the Event → graphic
-       mapping table above.
-    4. Confirm every graphic type is driven by real per-match data end to end
-       (same pattern as the goal graphic), not just the goal case.
-11. Frontend match selector
+    3. ✅ Built the remaining graphic types: `GoalDisallowedGraphic`,
+       `CardGraphic`, `PenaltyGraphic`, `SubstitutionGraphic`,
+       `ClearChanceGraphic`, `VarReviewGraphic`. Shared style tokens in
+       `src/graphics/shared.tsx` (`COLORS`, `Banner`, `TitlePill`) so every
+       graphic reads as one system. Revised twice per user feedback:
+       - `GoalDisallowed` made generic (works for any disallow reason, not
+         just offside): GOAL! banner struck through + ball crossed out + NO
+         GOAL stamp, score ticks up then reverts.
+       - `Penalty` uses real assets (`public/net.png`, `public/save.png`,
+         `public/ball.png`) with 4 distinct outcomes:
+         `'scored' | 'saved' | 'post' | 'out'` (not just scored/missed).
+       - `Substitution` simplified to just the reference `substitution.png`
+         icon (pop + spin) plus OUT/IN number badges — no player likeness.
+       - `ClearChance` redrawn with `net.png` + `ball.png` + dotted
+         trajectory, outcomes `'post' | 'wide'`.
+       - `VarReview` redrawn in code (not the reference PNG, which was a
+         watermarked stock image) matching its black-outline TV + "VAR" look.
+       - Ball flight paths (penalty + clear chance) use frame-spacing
+         proportional to distance between keyframes so linear motion reads as
+         one continuous speed — evenly-spaced-in-time waypoints on an uneven
+         path caused a visible mid-flight slowdown.
+       Audited against the `remotion-markup` Agent Skill: compliant
+       (`interpolate()`+`Easing`, `scale`/`translate`/`rotate` props,
+       `Interactive.Div`, no CSS transitions). One deliberate deviation: the
+       disallowed-goal strike-through/cross is hand-rolled SVG instead of
+       `@remotion/rough-notation`, because that package's oldest published
+       version (4.0.491) is newer than this project's pinned Remotion
+       (4.0.489) — adopting it would require a full Remotion upgrade, judged
+       not worth it for one annotation.
+    4. ✅ Every graphic type is now driven by real per-match data.
+       - `generate-script.mjs`: `event_type` is a restricted enum (`goal`,
+         `goal_disallowed`, `yellow_card`, `red_card`, `penalty`,
+         `substitution`, `clear_chance`, `var_review`) plus an `outcome` field
+         the model fills for `penalty` / `clear_chance` (the raw API can't
+         disambiguate a missed penalty into saved/post/out, and a clear chance
+         isn't an API event at all — both are read from the scraped article).
+       - `generate-graphics-timeline.mjs`: for each key moment, normalizes the
+         event type and cross-references the raw API-Football events to build
+         the matching graphic's props. Goal/disallowed compute the running /
+         standing score; cards read `detail`; penalty uses API scored-vs-missed
+         then the model's `outcome` (default `saved`) for the miss; substitution
+         pulls shirt numbers from a new `/fixtures/lineups` fetch
+         (`fetchFixtureLineups` in `api-football.mjs`) — player=ON, assist=OFF,
+         surname-only badges; VAR is propless; clear_chance is purely the
+         model's `outcome`.
+       - `src/ballsy.tsx`: `GraphicsEntry` is a discriminated union over all 7
+         types with a per-type on-screen duration; a `renderGraphic()` switch
+         mounts the right component inside each `<Sequence>`.
+       Validated end to end: the real fixture 979138 still emits its 3 goals
+       unchanged, and a synthetic all-types script (built over 979138's real
+       card/subst events) produced correct props for every branch, incl. real
+       shirt numbers from the lineups endpoint.
+       Known caveat: `goal_disallowed` scoringTeam relies on a matching API
+       `Var` event; if none exists it defaults to `home` with a warning (the
+       free tier rarely has disallowed-goal events).
+11. **← YOU ARE HERE:** Frontend match selector
 
 ## Out of scope for v1 (deliberately)
 
