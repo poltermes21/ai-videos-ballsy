@@ -33,3 +33,8 @@ public/audio/
 
 # Generated match scripts — regenerable test/review output, not source.
 scripts/output/
+
+# Python sidecar (SofaScore) — local venv + bytecode caches
+scripts/sofascore/.venv/
+__pycache__/
+*.pyc

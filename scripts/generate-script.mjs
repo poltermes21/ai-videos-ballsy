@@ -1,6 +1,6 @@
-// Generates Ballsy's match script from API-Football events + Firecrawl headlines.
+// Generates Ballsy's match script from SofaScore events + Firecrawl articles.
 //
-// Usage: node --env-file=.env scripts/generate-script.mjs
+// Usage: node --env-file=.env scripts/generate-script.mjs <matchId>
 
 import {mkdir, writeFile} from 'node:fs/promises';
 import {dirname, join} from 'node:path';
@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
 import {zodOutputFormat} from '@anthropic-ai/sdk/helpers/zod';
 import {z} from 'zod';
-import {findWorldCupFixtureAndEvents} from './lib/api-football.mjs';
+import {getMatch} from './lib/match-source.mjs';
 import {isLikelyValidArticle, scrapeArticle, searchHeadlines} from './lib/firecrawl.mjs';
 
 const OUTPUT_DIR = join(dirname(fileURLToPath(import.meta.url)), 'output');
@@ -111,7 +111,13 @@ Concrete filtering rules:
 
 GROUNDING RULE: only state as fact what's actually present in the match data, headlines, or article excerpts you're given below. Do NOT invent historical stats, records, streaks, or trivia ("back-to-back third-place finishes", "his fifth goal of the tournament", etc.) unless that exact fact appears in the provided input. Casual tone does not mean casual with the truth — if you don't have a fact grounded in the input, don't say it as one.
 
-You'll get real article excerpts (scraped from match reports) alongside the structured events. Use them to describe HOW each key moment actually happened — the buildup, the type of finish, the reaction — instead of just stating that it happened. API-Football's own data only gives you a bare label like "Normal Goal"; the article text is where the actual story is.
+You'll get real article excerpts (scraped from match reports) alongside the structured events. Use them to describe HOW each key moment actually happened — the buildup, the type of finish, the reaction — instead of just stating that it happened. The structured events give you the what/when/who; the article text is where the actual story is.
+
+GROUNDED CONTEXT — alongside the events you may get a "context" block with:
+- form: each team's league position, points, last 5 results (e.g. "WLLWL"), and average rating — i.e. how they came INTO the match.
+- h2h: the head-to-head record between these two (home wins / draws / away wins).
+- stats: match totals — possession, shots, shots on target, xg (expected goals), corners, goalkeeper saves.
+Use these to add real stakes and texture so the recap sounds like it was watched by someone who actually knows the context: "both scrapping near the bottom", "hadn't won this fixture in years", "an end-to-end mess, 21 shots to 17", "the xg says nobody deserved to lose". This is what separates a bare play-by-play from a recap that feels informed and close. The GROUNDING RULE still applies: only cite numbers/facts actually present in the context block, and don't dump every stat — pick the one or two that tell the story of THIS match.
 
 DURATION REQUIREMENT — this is a short-form video and it must run 30-90 seconds read aloud, which at a casual conversational pace is roughly 140-220 words total across every block. If a draft feels short, do NOT pad it with filler — add real texture to the key moments using the article excerpts (how the goal happened, who set it up, the stakes in that moment). A recap that's just a list of bare facts will always come in short; a recap with a story for each moment won't.
 
@@ -133,12 +139,16 @@ Each block (and each moment inside key_moments) is written as a list of SEGMENTS
 
 You may reference real player and team names in the text (this is spoken commentary, not a visual) — but the controversy block must stay opinion-framed, never a factual accusation about a real person.`;
 
-// Optional CLI arg picks which finished fixture to use, counting back from
-// the most recent (1 = last, 2 = second-to-last, ...).
-const fromEnd = Number(process.argv[2]) || 1;
-const {fixture, events} = await findWorldCupFixtureAndEvents(2022, fromEnd);
+// The SofaScore match id (event id) to build the script for.
+const matchId = process.argv[2];
+if (!matchId) {
+  console.error('Usage: node --env-file=.env scripts/generate-script.mjs <matchId>');
+  process.exit(1);
+}
+const match = getMatch(matchId);
+console.log(`Match: ${match.home} ${match.homeScore}-${match.awayScore} ${match.away} (${match.tournament})`);
 
-const query = `${fixture.teams.home.name} ${fixture.teams.away.name} World Cup ${fixture.league.season}`;
+const query = `${match.home} ${match.away} ${match.tournament ?? ''}`.trim();
 const headlines = await searchHeadlines(query, 8);
 
 console.log(`\nHeadlines found (${headlines.length}):`);
@@ -189,21 +199,30 @@ for (const url of articleCandidates) {
 }
 console.log('');
 
+// Resolve home/away to real team names so the model can read each event.
+const teamName = (side) => (side === 'home' ? match.home : match.away);
+
 const matchData = {
   match: {
-    home: fixture.teams.home.name,
-    away: fixture.teams.away.name,
-    score: `${fixture.goals.home}-${fixture.goals.away}`,
-    date: fixture.fixture.date,
+    home: match.home,
+    away: match.away,
+    score: `${match.homeScore}-${match.awayScore}`,
+    date: match.date ? new Date(match.date * 1000).toISOString() : null,
+    tournament: match.tournament,
   },
-  events: events.map((e) => ({
-    minute: e.time.elapsed,
-    team: e.team.name,
-    player: e.player.name,
-    assist: e.assist.name,
+  context: match.context,
+  events: match.events.map((e) => ({
+    minute: e.minute,
+    team: teamName(e.team),
     type: e.type,
-    detail: e.detail,
-    comments: e.comments,
+    ...(e.player ? {player: e.player} : {}),
+    ...(e.assist ? {assist: e.assist} : {}),
+    ...(e.penalty ? {penalty: true} : {}),
+    ...(e.outcome ? {penaltyOutcome: e.outcome} : {}),
+    ...(e.cardType ? {cardType: e.cardType} : {}),
+    ...(e.decision ? {varDecision: e.decision} : {}),
+    ...(e.in ? {playerIn: e.in.name, playerOut: e.out?.name} : {}),
+    ...(e.homeScore != null ? {score: `${e.homeScore}-${e.awayScore}`} : {}),
   })),
   headlines: headlines.map((h) => ({
     title: h.title,
@@ -250,7 +269,7 @@ for (const [name, block] of blocksWithSegments) {
 }
 
 await mkdir(OUTPUT_DIR, {recursive: true});
-const outputPath = join(OUTPUT_DIR, `${fixture.fixture.id}.json`);
+const outputPath = join(OUTPUT_DIR, `${matchId}.json`);
 await writeFile(
   outputPath,
   JSON.stringify({reviewStatus: 'pending', reviewedAt: null, script}, null, 2),
@@ -267,6 +286,6 @@ console.log(
   `Word count: ${wordCount} (~${Math.round(wordCount / 2.6)}-${Math.round(wordCount / 1.7)}s at a casual pace)`,
 );
 console.log(
-  `Review with: node --env-file=.env scripts/review-script.mjs ${fixture.fixture.id}`,
+  `Review with: node --env-file=.env scripts/review-script.mjs ${matchId}`,
 );
 console.log(JSON.stringify(script, null, 2));

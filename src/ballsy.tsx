@@ -118,7 +118,8 @@ const VISEME_INPUT_NAME = 'viseme';
 const EXPRESSION_INPUT_NAME = 'expression';
 
 // Test fixture until step 11 (frontend match selector) picks a real one.
-const FIXTURE_ID = '979138';
+// SofaScore event id (Eredivisie 25/26 — SC Telstar 2-2 Excelsior).
+const FIXTURE_ID = '14053814';
 
 const EXPRESSION_NAMES = [
   'neutral',
