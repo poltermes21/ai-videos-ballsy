@@ -22,9 +22,21 @@ function renderBlock(name, block) {
   console.log(`\n${name.toUpperCase()}:\n  ${text}`);
 }
 
+// Summarize a key_moment's tagged events (minute + type/outcome), so review
+// output stays useful now that a moment can carry more than one event. Falls
+// back to the old single-event-per-moment shape for scripts saved before
+// per-event tagging existed.
+function summarizeEvents(moment) {
+  const events = moment.events ?? (moment.event_type ? [moment] : []);
+  if (events.length === 0) return 'no graphic';
+  return events
+    .map((e) => `${e.minute ?? '?'}' ${e.event_type}${e.outcome ? `/${e.outcome}` : ''}`)
+    .join(', ');
+}
+
 renderBlock('hook', script.hook);
 script.key_moments.forEach((m, i) =>
-  renderBlock(`key_moment[${i}] (min ${m.minute ?? '?'})`, m),
+  renderBlock(`key_moment[${i}] (${summarizeEvents(m)})`, m),
 );
 if (script.controversy) {
   renderBlock('controversy', script.controversy);

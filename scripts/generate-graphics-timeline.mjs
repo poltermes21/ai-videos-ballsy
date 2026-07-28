@@ -26,9 +26,26 @@ const alignment = JSON.parse(
   await readFile(join(OUTPUT_DIR, `${matchId}-alignment.json`), 'utf8'),
 );
 
-const keyMoments = computeBlockStartTimes(script, alignment)
+// Flatten every tagged event across all key_moments into one chronological
+// list, each timed to the exact segment that narrates it — not just the
+// start of the whole moment, so a moment that bundles several events (e.g.
+// two missed penalties then the equalizer) gets one graphic per event instead
+// of only the first. Falls back to the old single-event-per-moment shape for
+// scripts generated before per-event tagging existed.
+const taggedEvents = computeBlockStartTimes(script, alignment)
   .filter((b) => b.moment)
-  .map((b) => ({moment: b.moment, startTime: b.startTime}));
+  .flatMap((b) => {
+    const moment = b.moment;
+    const legacyEvents =
+      moment.events ??
+      (moment.event_type
+        ? [{minute: moment.minute, event_type: moment.event_type, outcome: moment.outcome, segmentIndex: 0}]
+        : []);
+    return legacyEvents.map((ev) => ({
+      ...ev,
+      startTime: b.segmentStartTimes?.[ev.segmentIndex] ?? b.startTime,
+    }));
+  });
 
 // Real, structured events from SofaScore (already normalized + chronological).
 const match = getMatch(matchId);
@@ -95,9 +112,10 @@ function badgeName(fullName) {
 
 const graphicsTimeline = [];
 
-for (const {moment, startTime} of keyMoments) {
-  const type = normalizeEventType(moment.event_type);
-  const minute = moment.minute;
+for (const ev of taggedEvents) {
+  const type = normalizeEventType(ev.event_type);
+  const minute = ev.minute;
+  const startTime = ev.startTime;
 
   if (type === 'goal') {
     const matched = nearestEvent((e) => e.type === 'goal', minute);
@@ -139,23 +157,36 @@ for (const {moment, startTime} of keyMoments) {
       props: {cardType, minute: matched?.minute ?? minute ?? 0},
     });
   } else if (type === 'penalty') {
-    // Outcome comes straight from SofaScore — scored / saved / post / out.
+    // Outcome AND score come straight from SofaScore — scored / saved / post / out.
     const pen = nearestEvent(
       (e) => (e.type === 'goal' && e.penalty) || e.type === 'penalty_missed',
       minute,
     );
     let outcome;
+    let scoreProps;
     if (pen && pen.type === 'goal') {
+      // A scored penalty is still a goal — carry its real running score so
+      // the scoreboard ticks up just like a regular Goal graphic would.
       outcome = 'scored';
+      scoreProps = {homeScore: pen.homeScore, awayScore: pen.awayScore, scoringTeam: pen.team};
     } else if (pen && pen.type === 'penalty_missed') {
-      outcome = pen.outcome; // saved | post | out
+      outcome = pen.outcome; // saved | post | out — score doesn't change
+      const standing = standingAtMinute(pen.minute);
+      scoreProps = {homeScore: standing.home, awayScore: standing.away, scoringTeam: pen.team};
     } else {
       // No structured penalty found — fall back to the model's read.
+      console.warn(`No structured penalty event near minute ${minute}; using model outcome, scoringTeam=home`);
       outcome = {penalty_scored: 'scored', penalty_saved: 'saved', penalty_post: 'post', penalty_out: 'out'}[
-        moment.outcome
+        ev.outcome
       ] ?? 'saved';
+      const standing = standingAtMinute(minute);
+      scoreProps = {homeScore: standing.home, awayScore: standing.away, scoringTeam: 'home'};
     }
-    graphicsTimeline.push({type: 'penalty', startTime, props: {outcome}});
+    graphicsTimeline.push({
+      type: 'penalty',
+      startTime,
+      props: {outcome, homeTeam, awayTeam, ...scoreProps},
+    });
   } else if (type === 'substitution') {
     const sub = nearestEvent((e) => e.type === 'substitution', minute);
     if (!sub) {
@@ -176,10 +207,10 @@ for (const {moment, startTime} of keyMoments) {
     graphicsTimeline.push({type: 'varReview', startTime, props: {}});
   } else if (type === 'clear_chance') {
     // Not a structured event — purely the model's read of the article text.
-    const outcome = moment.outcome === 'clear_chance_post' ? 'post' : 'wide';
+    const outcome = ev.outcome === 'clear_chance_post' ? 'post' : 'wide';
     graphicsTimeline.push({type: 'clearChance', startTime, props: {outcome}});
   } else if (type) {
-    console.warn(`Unrecognized event_type "${moment.event_type}" at minute ${minute}, skipping`);
+    console.warn(`Unrecognized event_type "${ev.event_type}" at minute ${minute}, skipping`);
   }
 }
 

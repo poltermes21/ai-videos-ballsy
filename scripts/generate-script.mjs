@@ -41,25 +41,23 @@ const TextBlock = z.object({
   segments: z.array(ExpressionSegment),
 });
 
-// Restricted vocabulary so each key moment maps deterministically to one
-// on-screen graphic in the render pipeline. `null` = no graphic for it.
-const EventType = z
-  .enum([
-    'goal',
-    'goal_disallowed',
-    'yellow_card',
-    'red_card',
-    'penalty',
-    'substitution',
-    'clear_chance',
-    'var_review',
-  ])
-  .nullable();
+// Restricted vocabulary so each tagged event maps deterministically to one
+// on-screen graphic in the render pipeline.
+const EventType = z.enum([
+  'goal',
+  'goal_disallowed',
+  'yellow_card',
+  'red_card',
+  'penalty',
+  'substitution',
+  'clear_chance',
+  'var_review',
+]);
 
 // Only meaningful for `penalty` and `clear_chance` (null otherwise). Lets the
-// model disambiguate cases the raw API data can't (a missed penalty in
-// API-Football is just "Missed Penalty" with no saved/post/out detail, and a
-// clear chance isn't an API event at all — both come from the article text).
+// model disambiguate cases the raw match data can't (SofaScore does give a
+// missed-penalty reason, but not every case is clean, and a clear chance
+// isn't a structured event at all — both may need the article text).
 const Outcome = z
   .enum([
     'penalty_scored',
@@ -71,10 +69,25 @@ const Outcome = z
   ])
   .nullable();
 
-const KeyMoment = z.object({
+// One graphic-worthy event mentioned inside a key_moment, pinned to the
+// segment that actually narrates it. A moment can reference SEVERAL of these
+// (e.g. two missed penalties then the equalizer, all in one moment) — each
+// gets tagged separately instead of collapsing the moment to one "main" event.
+const TaggedEvent = z.object({
   minute: z.number().nullable(),
+  segmentIndex: z
+    .number()
+    .int()
+    .min(0)
+    .describe('0-based index into this moment\'s own segments array — the segment that says this event out loud.'),
   event_type: EventType,
   outcome: Outcome,
+});
+
+const KeyMoment = z.object({
+  // 0 or more tagged events. Empty when the moment is pure narration with
+  // nothing graphic-worthy in it — never invent one just to fill this in.
+  events: z.array(TaggedEvent),
   segments: z.array(ExpressionSegment),
 });
 
@@ -128,11 +141,16 @@ Output exactly 5 blocks:
 4. result — 10-15s, ~30-45 words. Final score + what it means.
 5. outro — ~15-20 words. Short hook to the next match.
 
-EVENT TAGGING — each key_moment carries structured fields that trigger an on-screen graphic. Base them on the actual match data and scraped article text, never on guesses:
-- minute: the match minute it happened (integer), pulled from the event data. null only if it genuinely has none.
-- event_type: classify the moment as EXACTLY ONE of: "goal" (a goal that counted), "goal_disallowed" (a goal ruled out for ANY reason — offside, foul, handball), "yellow_card", "red_card", "penalty" (a penalty kick, scored or not), "substitution", "clear_chance" (a big chance that did NOT end in a goal — a near miss), "var_review" (a VAR check itself is the story). If it fits none, use null (the moment is still narrated, it just gets no graphic).
+EVENT TAGGING — each key_moment has an "events" array that triggers on-screen graphics. Base every tag on the actual match data and scraped article text, never on guesses.
+
+IMPORTANT: a moment can reference MORE THAN ONE graphic-worthy event. Dense moments are common — e.g. "Telstar miss a penalty, Excelsior miss one too, then Gyan de Regt taps in the equalizer" is 3 separate events inside ONE moment. Tag EACH one that happened, do not collapse them down to just the "main" one. If a moment is pure narration with nothing graphic-worthy, leave events as an empty array — never invent one.
+
+For each entry in the events array:
+- minute: the match minute it happened (integer), pulled from the match data. null only if it genuinely has none.
+- segmentIndex: the 0-based index into THIS moment's own "segments" array — the segment that actually says this event out loud. This times the graphic to the exact line, not the start of the whole moment. (If a moment has 2 segments and both a missed penalty and a goal are narrated in segment 0, tag both with segmentIndex 0; if the goal is only mentioned in segment 1, tag it segmentIndex 1.)
+- event_type: EXACTLY ONE of: "goal" (a goal that counted), "goal_disallowed" (a goal ruled out for ANY reason — offside, foul, handball), "yellow_card", "red_card", "penalty" (a penalty kick, scored or not), "substitution", "clear_chance" (a big chance that did NOT end in a goal — a near miss), "var_review" (a VAR check itself is the story).
 - outcome: null EXCEPT for these two event types:
-  - "penalty": one of "penalty_scored", "penalty_saved", "penalty_post", "penalty_out", decided from the article text. If the text doesn't make it clear and it wasn't scored, use "penalty_saved".
+  - "penalty": one of "penalty_scored", "penalty_saved", "penalty_post", "penalty_out", decided from the match data and article text. If unclear and it wasn't scored, use "penalty_saved".
   - "clear_chance": "clear_chance_post" (hit the woodwork) or "clear_chance_wide" (off target), decided from the article text. If unclear, use "clear_chance_wide".
 
 Each block (and each moment inside key_moments) is written as a list of SEGMENTS, not one flat string. A segment is {text, expression}, and the segments concatenate in order (joined by a space) to form the full spoken line. Split into a new segment whenever the emotional beat genuinely shifts — do NOT switch expression every few words, that looks twitchy. Guideline: short blocks (hook, outro) usually need only 1-2 segments; a key moment with real buildup-then-payoff texture can reasonably use 2-3. Expression options: neutral, excited, angry, disappointed, surprised.
@@ -267,6 +285,17 @@ for (const [name, block] of blocksWithSegments) {
     throw new Error(`${name} has no segments`);
   }
 }
+
+script.key_moments.forEach((moment, i) => {
+  for (const ev of moment.events) {
+    if (ev.segmentIndex >= moment.segments.length) {
+      throw new Error(
+        `key_moments[${i}]: event segmentIndex ${ev.segmentIndex} is out of range ` +
+          `(moment only has ${moment.segments.length} segments)`,
+      );
+    }
+  }
+});
 
 await mkdir(OUTPUT_DIR, {recursive: true});
 const outputPath = join(OUTPUT_DIR, `${matchId}.json`);

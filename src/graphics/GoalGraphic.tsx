@@ -8,6 +8,7 @@ import {
   staticFile,
   useCurrentFrame,
 } from "remotion";
+import { Scoreboard } from "./shared";
 
 type GoalGraphicProps = {
   homeTeam: string;
@@ -25,10 +26,6 @@ export const GoalGraphic: React.FC<GoalGraphicProps> = ({
   scoringTeam,
 }) => {
   const frame = useCurrentFrame();
-
-  const previousHomeScore = scoringTeam === "home" ? homeScore - 1 : homeScore;
-  const previousAwayScore = scoringTeam === "away" ? awayScore - 1 : awayScore;
-  const showNewScore = frame >= 18;
 
   return (
     <AbsoluteFill>
@@ -103,62 +100,17 @@ export const GoalGraphic: React.FC<GoalGraphicProps> = ({
       </Interactive.Div>
       <Interactive.Div
         name="Scoreboard"
-        style={{
-          position: "absolute",
-          bottom: "15%",
-          left: "50%",
-          translate: "-50%",
-          display: "flex",
-          alignItems: "center",
-          gap: 20,
-          padding: "14px 32px",
-          borderRadius: 999,
-          background: "black",
-          border: "3px solid white",
-          color: "white",
-          fontFamily: '"Arial Black", sans-serif',
-          fontSize: 34,
-        }}
+        style={{position: "absolute", bottom: "15%", left: "50%", translate: "-50%"}}
       >
-        <span>{homeTeam}</span>
-        <span
-          style={{
-            display: "inline-block",
-            minWidth: 32,
-            textAlign: "center",
-            color: "#FFD23F",
-            scale:
-              scoringTeam === "home" && showNewScore
-                ? interpolate(frame, [18, 24, 30], [1, 1.5, 1], {
-                    extrapolateLeft: "clamp",
-                    extrapolateRight: "clamp",
-                    easing: Easing.spring({ damping: 8 }),
-                  })
-                : 1,
-          }}
-        >
-          {showNewScore ? homeScore : previousHomeScore}
-        </span>
-        <span style={{ opacity: 0.6 }}>-</span>
-        <span
-          style={{
-            display: "inline-block",
-            minWidth: 32,
-            textAlign: "center",
-            color: "#FFD23F",
-            scale:
-              scoringTeam === "away" && showNewScore
-                ? interpolate(frame, [18, 24, 30], [1, 1.5, 1], {
-                    extrapolateLeft: "clamp",
-                    extrapolateRight: "clamp",
-                    easing: Easing.spring({ damping: 8 }),
-                  })
-                : 1,
-          }}
-        >
-          {showNewScore ? awayScore : previousAwayScore}
-        </span>
-        <span>{awayTeam}</span>
+        <Scoreboard
+          homeTeam={homeTeam}
+          awayTeam={awayTeam}
+          homeScore={homeScore}
+          awayScore={awayScore}
+          scoringTeam={scoringTeam}
+          frame={frame}
+          tickStart={18}
+        />
       </Interactive.Div>
     </AbsoluteFill>
   );

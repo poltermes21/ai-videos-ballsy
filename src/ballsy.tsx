@@ -60,7 +60,7 @@ type GraphicsEntry = {startTime: number} & (
   | {type: 'goal'; props: ScoreProps}
   | {type: 'goalDisallowed'; props: ScoreProps}
   | {type: 'card'; props: {cardType: 'yellow' | 'red'; minute: number}}
-  | {type: 'penalty'; props: {outcome: 'scored' | 'saved' | 'post' | 'out'}}
+  | {type: 'penalty'; props: {outcome: 'scored' | 'saved' | 'post' | 'out'} & ScoreProps}
   | {
       type: 'substitution';
       props: {
@@ -118,8 +118,10 @@ const VISEME_INPUT_NAME = 'viseme';
 const EXPRESSION_INPUT_NAME = 'expression';
 
 // Test fixture until step 11 (frontend match selector) picks a real one.
-// SofaScore event id (Eredivisie 25/26 — SC Telstar 2-2 Excelsior).
-const FIXTURE_ID = '14053814';
+// SofaScore event id (Eredivisie 25/26 — SC Telstar 2-2 Excelsior). Exported
+// so Root.tsx's calculateMetadata can size the composition to this fixture's
+// real audio length without duplicating the id.
+export const FIXTURE_ID = '14053814';
 
 const EXPRESSION_NAMES = [
   'neutral',

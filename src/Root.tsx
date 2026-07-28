@@ -1,6 +1,6 @@
 import "./index.css";
-import { Composition } from "remotion";
-import { Ballsy } from "./ballsy";
+import { CalculateMetadataFunction, Composition, staticFile } from "remotion";
+import { Ballsy, FIXTURE_ID } from "./ballsy";
 import { GoalGraphic } from "./graphics/GoalGraphic";
 import { GoalDisallowedGraphic } from "./graphics/GoalDisallowedGraphic";
 import { CardGraphic } from "./graphics/CardGraphic";
@@ -9,16 +9,42 @@ import { SubstitutionGraphic } from "./graphics/SubstitutionGraphic";
 import { ClearChanceGraphic } from "./graphics/ClearChanceGraphic";
 import { VarReviewGraphic } from "./graphics/VarReviewGraphic";
 
+// Sizes the Ballsy composition to the real audio length instead of a
+// hand-maintained constant. The ElevenLabs alignment file that carries the
+// exact end time only exists in scripts/output/ (a Node-side build artifact,
+// never copied into public/) — so it can't be fetched here. Instead we reuse
+// `${FIXTURE_ID}-expressions.json`, which IS public (ballsy.tsx already
+// fetches it) and whose last cue's `end` is derived from that same exact
+// value in generate-expressions.mjs, so it's an equally precise source.
+const FPS = 30;
+const TAIL_BUFFER_SECONDS = 2;
+
+const calculateBallsyMetadata: CalculateMetadataFunction<
+  Record<string, unknown>
+> = async ({ abortSignal }) => {
+  const res = await fetch(staticFile(`audio/${FIXTURE_ID}-expressions.json`), {
+    signal: abortSignal,
+  });
+  const { expressionCues } = await res.json();
+  const durationSeconds =
+    (expressionCues?.at(-1)?.end ?? 0) + TAIL_BUFFER_SECONDS;
+
+  return {
+    durationInFrames: Math.ceil(durationSeconds * FPS),
+  };
+};
+
 export const RemotionRoot: React.FC = () => {
   return (
     <>
       <Composition
         id="Ballsy"
         component={Ballsy}
-        durationInFrames={1900}
-        fps={30}
+        durationInFrames={2440} // fallback shown before calculateMetadata resolves
+        fps={FPS}
         width={1080}
         height={1080}
+        calculateMetadata={calculateBallsyMetadata}
       />
       <Composition
         id="GoalGraphicTest"
@@ -69,7 +95,14 @@ export const RemotionRoot: React.FC = () => {
         fps={30}
         width={1080}
         height={1080}
-        defaultProps={{ outcome: "scored" as const }}
+        defaultProps={{
+          outcome: "scored" as const,
+          homeTeam: "TEL",
+          awayTeam: "EXC",
+          homeScore: 2,
+          awayScore: 1,
+          scoringTeam: "away" as const,
+        }}
       />
       <Composition
         id="PenaltySavedTest"
@@ -78,7 +111,14 @@ export const RemotionRoot: React.FC = () => {
         fps={30}
         width={1080}
         height={1080}
-        defaultProps={{ outcome: "saved" as const }}
+        defaultProps={{
+          outcome: "saved" as const,
+          homeTeam: "TEL",
+          awayTeam: "EXC",
+          homeScore: 2,
+          awayScore: 0,
+          scoringTeam: "home" as const,
+        }}
       />
       <Composition
         id="PenaltyPostTest"
@@ -87,7 +127,14 @@ export const RemotionRoot: React.FC = () => {
         fps={30}
         width={1080}
         height={1080}
-        defaultProps={{ outcome: "post" as const }}
+        defaultProps={{
+          outcome: "post" as const,
+          homeTeam: "TEL",
+          awayTeam: "EXC",
+          homeScore: 2,
+          awayScore: 0,
+          scoringTeam: "away" as const,
+        }}
       />
       <Composition
         id="PenaltyOutTest"
@@ -96,7 +143,14 @@ export const RemotionRoot: React.FC = () => {
         fps={30}
         width={1080}
         height={1080}
-        defaultProps={{ outcome: "out" as const }}
+        defaultProps={{
+          outcome: "out" as const,
+          homeTeam: "TEL",
+          awayTeam: "EXC",
+          homeScore: 2,
+          awayScore: 0,
+          scoringTeam: "home" as const,
+        }}
       />
       <Composition
         id="SubstitutionGraphicTest"

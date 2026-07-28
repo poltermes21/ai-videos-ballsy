@@ -1,11 +1,16 @@
 import React from 'react';
 import {AbsoluteFill, Easing, Img, Interactive, interpolate, staticFile, useCurrentFrame} from 'remotion';
-import {Banner, COLORS, TitlePill} from './shared';
+import {Banner, COLORS, Scoreboard, TitlePill} from './shared';
 
 type PenaltyOutcome = 'scored' | 'saved' | 'post' | 'out';
 
 type PenaltyGraphicProps = {
   outcome: PenaltyOutcome;
+  homeTeam: string;
+  awayTeam: string;
+  homeScore: number;
+  awayScore: number;
+  scoringTeam: 'home' | 'away';
 };
 
 // The goal (net.png) box in composition space (1080x1080), plus the derived
@@ -33,7 +38,14 @@ const PATHS: Record<PenaltyOutcome, {frames: number[]; xs: number[]; ys: number[
   out: {frames: [6, 17, 24], xs: [SPOT.x, 552, 600], ys: [SPOT.y, 340, 40]},
 };
 
-export const PenaltyGraphic: React.FC<PenaltyGraphicProps> = ({outcome}) => {
+export const PenaltyGraphic: React.FC<PenaltyGraphicProps> = ({
+  outcome,
+  homeTeam,
+  awayTeam,
+  homeScore,
+  awayScore,
+  scoringTeam,
+}) => {
   const frame = useCurrentFrame();
   const path = PATHS[outcome];
 
@@ -164,7 +176,7 @@ export const PenaltyGraphic: React.FC<PenaltyGraphicProps> = ({outcome}) => {
         name="Penalty result"
         style={{
           position: 'absolute',
-          bottom: '9%',
+          bottom: outcome === 'scored' ? '20%' : '9%',
           left: '50%',
           translate: '-50%',
           scale: bannerReveal,
@@ -173,6 +185,30 @@ export const PenaltyGraphic: React.FC<PenaltyGraphicProps> = ({outcome}) => {
       >
         <Banner text={banner.text} color={banner.color} textColor={banner.textColor} fontSize={58} />
       </Interactive.Div>
+
+      {/* A scored penalty changes the score — show the tick, same as a goal. */}
+      {outcome === 'scored' && (
+        <Interactive.Div
+          name="Scoreboard"
+          style={{
+            position: 'absolute',
+            bottom: '9%',
+            left: '50%',
+            translate: '-50%',
+            scale: bannerReveal,
+          }}
+        >
+          <Scoreboard
+            homeTeam={homeTeam}
+            awayTeam={awayTeam}
+            homeScore={homeScore}
+            awayScore={awayScore}
+            scoringTeam={scoringTeam}
+            frame={frame}
+            tickStart={30}
+          />
+        </Interactive.Div>
+      )}
     </AbsoluteFill>
   );
 };
