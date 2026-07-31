@@ -1,6 +1,7 @@
 import React from 'react';
 import {AbsoluteFill, Easing, Img, Interactive, interpolate, staticFile, useCurrentFrame} from 'remotion';
 import {COLORS} from './shared';
+import {displayFontFamily} from '../fonts';
 
 type GoalDisallowedGraphicProps = {
   homeTeam: string;
@@ -57,7 +58,7 @@ export const GoalDisallowedGraphic: React.FC<GoalDisallowedGraphicProps> = ({
         style={{position: 'absolute', top: '11%', left: '50%', translate: '-50%', scale: bannerScale, rotate: '-6deg'}}
       >
         <div style={{position: 'relative', background: COLORS.red, padding: '10px 48px', boxShadow: '0 8px 0 rgba(0,0,0,0.25)', border: '4px solid black'}}>
-          <span style={{fontFamily: '"Arial Black", sans-serif', fontWeight: 900, fontSize: 68, color: 'white', letterSpacing: 3, WebkitTextStroke: '2px black'}}>
+          <span style={{fontFamily: displayFontFamily, fontSize: 68, color: 'white', letterSpacing: 3, WebkitTextStroke: '2px black'}}>
             GOAL!
           </span>
           <div style={{position: 'absolute', top: '50%', left: '50%', translate: '-50%', width: '118%', height: 16, background: 'black', scale: `${strike} 1`}} />
@@ -86,7 +87,7 @@ export const GoalDisallowedGraphic: React.FC<GoalDisallowedGraphicProps> = ({
         name="No goal stamp"
         style={{position: 'absolute', top: '68%', left: '50%', translate: '-50%', scale: stampScale, rotate: '-12deg', opacity: stampOpacity}}
       >
-        <div style={{border: '8px solid ' + COLORS.red, borderRadius: 14, padding: '8px 30px', fontFamily: '"Arial Black", sans-serif', fontSize: 72, color: COLORS.red, letterSpacing: 4, WebkitTextStroke: '1px #7f1010'}}>
+        <div style={{border: '8px solid ' + COLORS.red, borderRadius: 14, padding: '8px 30px', fontFamily: displayFontFamily, fontSize: 72, color: COLORS.red, letterSpacing: 4, WebkitTextStroke: '1px #7f1010'}}>
           NO GOAL
         </div>
       </Interactive.Div>
@@ -94,7 +95,7 @@ export const GoalDisallowedGraphic: React.FC<GoalDisallowedGraphicProps> = ({
       {/* Scoreboard */}
       <Interactive.Div
         name="Scoreboard"
-        style={{position: 'absolute', bottom: '8%', left: '50%', translate: '-50%', display: 'flex', alignItems: 'center', gap: 20, padding: '14px 32px', borderRadius: 999, background: 'black', border: '3px solid white', color: 'white', fontFamily: '"Arial Black", sans-serif', fontSize: 34}}
+        style={{position: 'absolute', bottom: '8%', left: '50%', translate: '-50%', display: 'flex', alignItems: 'center', gap: 20, padding: '14px 32px', borderRadius: 999, background: 'black', border: '3px solid white', color: 'white', fontFamily: displayFontFamily, fontSize: 34}}
       >
         <span>{homeTeam}</span>
         <span style={{display: 'inline-block', minWidth: 32, textAlign: 'center', color: COLORS.yellow, scale: scoringTeam === 'home' ? numScale : 1}}>{homeDisplay}</span>

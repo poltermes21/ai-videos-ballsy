@@ -1,6 +1,7 @@
 import React from 'react';
 import {AbsoluteFill, Easing, Img, Interactive, interpolate, staticFile, useCurrentFrame} from 'remotion';
 import {COLORS, TitlePill} from './shared';
+import {displayFontFamily} from '../fonts';
 
 type SubstitutionGraphicProps = {
   playerOnName: string;
@@ -23,7 +24,7 @@ const Badge: React.FC<{color: string; tag: string; number: number; name: string;
         borderRadius: 8,
         padding: '3px 16px',
         color: 'white',
-        fontFamily: '"Arial Black", sans-serif',
+        fontFamily: displayFontFamily,
         fontSize: 24,
         letterSpacing: 3,
         border: '3px solid black',
@@ -43,7 +44,7 @@ const Badge: React.FC<{color: string; tag: string; number: number; name: string;
         alignItems: 'center',
         justifyContent: 'center',
         boxShadow: '0 10px 0 rgba(0,0,0,0.22)',
-        fontFamily: '"Arial Black", sans-serif',
+        fontFamily: displayFontFamily,
         fontSize: 58,
         color: 'white',
         WebkitTextStroke: '2px black',
@@ -57,7 +58,7 @@ const Badge: React.FC<{color: string; tag: string; number: number; name: string;
         borderRadius: 8,
         padding: '5px 16px',
         color: 'white',
-        fontFamily: '"Arial Black", sans-serif',
+        fontFamily: displayFontFamily,
         fontSize: 26,
         letterSpacing: 1,
         maxWidth: 280,

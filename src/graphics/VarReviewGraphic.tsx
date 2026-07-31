@@ -1,6 +1,7 @@
 import React from 'react';
 import {AbsoluteFill, Easing, Interactive, interpolate, useCurrentFrame} from 'remotion';
 import {COLORS, TitlePill} from './shared';
+import {displayFontFamily} from '../fonts';
 
 // Redrawn (not the watermarked stock PNG) in the same iconic style: a
 // black-outlined TV monitor with big "VAR" letters, plus a scan sweep and a
@@ -32,7 +33,7 @@ export const VarReviewGraphic: React.FC = () => {
             border: '4px solid black',
             padding: '10px 46px',
             boxShadow: '0 8px 0 rgba(0,0,0,0.25)',
-            fontFamily: '"Arial Black", sans-serif',
+            fontFamily: displayFontFamily,
             fontSize: 54,
             color: 'white',
             letterSpacing: 5,
@@ -65,8 +66,7 @@ export const VarReviewGraphic: React.FC = () => {
             {/* VAR text */}
             <span
               style={{
-                fontFamily: '"Arial Black", sans-serif',
-                fontWeight: 900,
+                fontFamily: displayFontFamily,
                 fontSize: 168,
                 letterSpacing: 6,
                 color: 'black',
@@ -93,7 +93,7 @@ export const VarReviewGraphic: React.FC = () => {
             {/* REC indicator */}
             <div style={{position: 'absolute', top: 16, left: 16, display: 'flex', alignItems: 'center', gap: 10}}>
               <div style={{width: 22, height: 22, borderRadius: '50%', background: COLORS.red, opacity: recOn ? 1 : 0.15}} />
-              <span style={{fontFamily: '"Arial Black", sans-serif', fontSize: 24, color: COLORS.red, letterSpacing: 2}}>REC</span>
+              <span style={{fontFamily: displayFontFamily, fontSize: 24, color: COLORS.red, letterSpacing: 2}}>REC</span>
             </div>
           </div>
           {/* Stand */}

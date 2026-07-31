@@ -7,7 +7,9 @@
   "private": true,
   "dependencies": {
     "@anthropic-ai/sdk": "^0.111.0",
+    "@remotion/captions": "4.0.489",
     "@remotion/cli": "4.0.489",
+    "@remotion/google-fonts": "4.0.489",
     "@remotion/rive": "^4.0.489",
     "@remotion/tailwind-v4": "4.0.489",
     "react": "19.2.3",

@@ -18,6 +18,9 @@ import type {
   SMIInput,
   StateMachineInstance,
 } from '@rive-app/canvas-advanced';
+import type {Caption} from '@remotion/captions';
+import {Captions} from './Captions';
+import {Background} from './Background';
 import {GoalGraphic} from './graphics/GoalGraphic';
 import {GoalDisallowedGraphic} from './graphics/GoalDisallowedGraphic';
 import {CardGraphic} from './graphics/CardGraphic';
@@ -55,8 +58,12 @@ type ScoreProps = {
 };
 
 // Discriminated union — one variant per event graphic. Shapes must match the
-// props emitted by scripts/generate-graphics-timeline.mjs.
-type GraphicsEntry = {startTime: number} & (
+// props emitted by scripts/generate-graphics-timeline.mjs. `durationSeconds`
+// is how long the underlying script segment actually takes to say (so the
+// graphic stays up for the whole line instead of a generic fixed duration);
+// optional for backward compat with graphics.json files generated before
+// this existed — GRAPHIC_DURATION below is the fallback for those.
+type GraphicsEntry = {startTime: number; durationSeconds?: number} & (
   | {type: 'goal'; props: ScoreProps}
   | {type: 'goalDisallowed'; props: ScoreProps}
   | {type: 'card'; props: {cardType: 'yellow' | 'red'; minute: number}}
@@ -186,6 +193,7 @@ export const Ballsy: React.FC = () => {
   const [ready, setReady] = useState(false);
   const [graphicsTimeline, setGraphicsTimeline] = useState<GraphicsEntry[]>([]);
   const [avatarKeyframes, setAvatarKeyframes] = useState<AvatarKeyframe[]>([]);
+  const [captions, setCaptions] = useState<Caption[]>([]);
   const [debugInfo, setDebugInfo] = useState<{
     letter: string;
     visemeIndex: number;
@@ -212,7 +220,10 @@ export const Ballsy: React.FC = () => {
       fetch(staticFile(`audio/${FIXTURE_ID}-avatar.json`)).then(
         (res) => res.json() as Promise<{keyframes: AvatarKeyframe[]}>,
       ),
-    ]).then(async ([riveCanvas, lipSyncData, expressionData, graphicsData, avatarData]) => {
+      fetch(staticFile(`audio/${FIXTURE_ID}-captions.json`)).then(
+        (res) => res.json() as Promise<{captions: Caption[]}>,
+      ),
+    ]).then(async ([riveCanvas, lipSyncData, expressionData, graphicsData, avatarData, captionsData]) => {
       const buffer = await fetch(staticFile('ballsy.riv')).then((res) =>
         res.arrayBuffer(),
       );
@@ -265,6 +276,7 @@ export const Ballsy: React.FC = () => {
       expressionCuesRef.current = expressionData.expressionCues;
       setGraphicsTimeline(graphicsData.graphicsTimeline);
       setAvatarKeyframes(avatarData.keyframes);
+      setCaptions(captionsData.captions);
       setReady(true);
       continueRender(handle);
     });
@@ -368,7 +380,21 @@ export const Ballsy: React.FC = () => {
 
   return (
     <AbsoluteFill>
+      <Background />
       <Audio src={staticFile(`audio/${FIXTURE_ID}.mp3`)} />
+      {graphicsTimeline.map((entry, i) => {
+        const durationInFrames =
+          entry.durationSeconds != null
+            ? Math.round(entry.durationSeconds * fps)
+            : GRAPHIC_DURATION[entry.type];
+        return (
+          <Sequence key={i} from={Math.round(entry.startTime * fps)} durationInFrames={durationInFrames}>
+            {renderGraphic(entry)}
+          </Sequence>
+        );
+      })}
+      {/* Renders after (on top of) the event graphics, per feedback: Ballsy
+          should sit in front of the animations, not behind them. */}
       <div
         style={{
           position: 'absolute',
@@ -376,19 +402,19 @@ export const Ballsy: React.FC = () => {
           height,
           translate: `${avatarX}px ${avatarY}px`,
           scale: avatarScale,
+          // The Rive canvas doesn't clear to true transparency (confirmed by
+          // swapping the page background and seeing the square tint shift
+          // with it) — it leaves a faint square the size of its own
+          // contain-fit bounding box. Harmless when Ballsy rendered behind
+          // graphics/on white, but visible now that Ballsy is on top and the
+          // page has a background. Clipping to a circle sized around the
+          // ball's own silhouette hides it without touching the Rive file.
+          clipPath: 'circle(34% at 50% 50%)',
         }}
       >
         <canvas ref={canvasRef} width={width} height={height} />
       </div>
-      {graphicsTimeline.map((entry, i) => (
-        <Sequence
-          key={i}
-          from={Math.round(entry.startTime * fps)}
-          durationInFrames={GRAPHIC_DURATION[entry.type]}
-        >
-          {renderGraphic(entry)}
-        </Sequence>
-      ))}
+      <Captions captions={captions} />
       <div
         style={{
           position: 'absolute',

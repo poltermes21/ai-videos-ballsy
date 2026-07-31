@@ -9,6 +9,7 @@ import {
   useCurrentFrame,
 } from "remotion";
 import { Scoreboard } from "./shared";
+import { displayFontFamily } from "../fonts";
 
 type GoalGraphicProps = {
   homeTeam: string;
@@ -86,8 +87,7 @@ export const GoalGraphic: React.FC<GoalGraphicProps> = ({
         >
           <span
             style={{
-              fontFamily: '"Arial Black", sans-serif',
-              fontWeight: 900,
+              fontFamily: displayFontFamily,
               fontSize: 68,
               color: "white",
               letterSpacing: 3,

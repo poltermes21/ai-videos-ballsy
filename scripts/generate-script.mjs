@@ -124,13 +124,18 @@ Concrete filtering rules:
 
 GROUNDING RULE: only state as fact what's actually present in the match data, headlines, or article excerpts you're given below. Do NOT invent historical stats, records, streaks, or trivia ("back-to-back third-place finishes", "his fifth goal of the tournament", etc.) unless that exact fact appears in the provided input. Casual tone does not mean casual with the truth — if you don't have a fact grounded in the input, don't say it as one.
 
+VAR_REVIEW SEMANTICS — read this carefully, a past script got this backwards. A "var" event's \`varDecision\` label (e.g. "penaltyNotAwarded", "goalAwarded") describes the call BEING REVIEWED, not necessarily the final result — the \`varConfirmed\` field tells you whether that call stood:
+- \`varConfirmed: true\` → the labeled call stands as written (e.g. "penaltyNotAwarded" + true = no penalty, final).
+- \`varConfirmed: false\` → the labeled call was OVERTURNED — the opposite happened (e.g. "penaltyNotAwarded" + false = a penalty WAS actually given; "goalAwarded" + false = the goal was actually disallowed).
+Never narrate a var event from the label alone. ALWAYS cross-check nearby events: if a "penaltyNotAwarded"/false is followed shortly after by a scored penalty for the same team, that confirms the penalty was awarded on review and taken — narrate it as one continuous incident (VAR review → penalty given → [scored/missed]), not as two unrelated things.
+
 You'll get real article excerpts (scraped from match reports) alongside the structured events. Use them to describe HOW each key moment actually happened — the buildup, the type of finish, the reaction — instead of just stating that it happened. The structured events give you the what/when/who; the article text is where the actual story is.
 
 GROUNDED CONTEXT — alongside the events you may get a "context" block with:
 - form: each team's league position, points, last 5 results (e.g. "WLLWL"), and average rating — i.e. how they came INTO the match.
 - h2h: the head-to-head record between these two (home wins / draws / away wins).
 - stats: match totals — possession, shots, shots on target, xg (expected goals), corners, goalkeeper saves.
-Use these to add real stakes and texture so the recap sounds like it was watched by someone who actually knows the context: "both scrapping near the bottom", "hadn't won this fixture in years", "an end-to-end mess, 21 shots to 17", "the xg says nobody deserved to lose". This is what separates a bare play-by-play from a recap that feels informed and close. The GROUNDING RULE still applies: only cite numbers/facts actually present in the context block, and don't dump every stat — pick the one or two that tell the story of THIS match.
+Use "form" and "h2h" freely — a real fan naturally brings up league position or "these two never play a boring one" as background. But "stats" (shots, shots on target, xg, corners, saves, possession) is different: a regular person watching a match does NOT casually cite exact shot counts or xG numbers — that reads as a stats bot, not a mate recapping the game. Only reach for a stat when it's genuinely notable: a HUGE gap between the teams (e.g. 21 shots to 4), a scoreline that the numbers make look wrong (a team battered on shots/xg but still lost or drew), or something statistically freakish. If the stats are unremarkable or close, skip them entirely rather than forcing one in as filler. The GROUNDING RULE still applies: only cite numbers actually present in the context block.
 
 DURATION REQUIREMENT — this is a short-form video and it must run 30-90 seconds read aloud, which at a casual conversational pace is roughly 140-220 words total across every block. If a draft feels short, do NOT pad it with filler — add real texture to the key moments using the article excerpts (how the goal happened, who set it up, the stakes in that moment). A recap that's just a list of bare facts will always come in short; a recap with a story for each moment won't.
 
@@ -238,7 +243,11 @@ const matchData = {
     ...(e.penalty ? {penalty: true} : {}),
     ...(e.outcome ? {penaltyOutcome: e.outcome} : {}),
     ...(e.cardType ? {cardType: e.cardType} : {}),
-    ...(e.decision ? {varDecision: e.decision} : {}),
+    // `confirmed` is critical, not decorative — see the VAR_REVIEW SEMANTICS
+    // note below. Dropping it (as an earlier version of this mapping did)
+    // caused the model to misread an overturned "penaltyNotAwarded" as a
+    // final "no penalty", when the match data showed the opposite happened.
+    ...(e.decision ? {varDecision: e.decision, varConfirmed: e.confirmed} : {}),
     ...(e.in ? {playerIn: e.in.name, playerOut: e.out?.name} : {}),
     ...(e.homeScore != null ? {score: `${e.homeScore}-${e.awayScore}`} : {}),
   })),

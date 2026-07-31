@@ -1,5 +1,6 @@
 import React from 'react';
 import {AbsoluteFill, Easing, Interactive, interpolate, useCurrentFrame} from 'remotion';
+import {displayFontFamily} from '../fonts';
 
 type CardGraphicProps = {
   cardType: 'yellow' | 'red';
@@ -71,7 +72,7 @@ export const CardGraphic: React.FC<CardGraphicProps> = ({cardType, minute}) => {
             borderRadius: 999,
             padding: '10px 36px',
             color: 'white',
-            fontFamily: '"Arial Black", sans-serif',
+            fontFamily: displayFontFamily,
             fontSize: 54,
             letterSpacing: 2,
           }}

@@ -1,8 +1,9 @@
 import React from 'react';
 import {Easing, interpolate} from 'remotion';
+import {displayFontFamily} from '../fonts';
 
 // Shared cartoon style tokens so every event graphic reads as one system:
-// bold Arial-Black text, thick black outlines, chunky drop shadow.
+// bold comic-display text, thick black outlines, chunky drop shadow.
 export const COLORS = {
   red: '#FF3B3B',
   green: '#22C55E',
@@ -28,8 +29,7 @@ export const Banner: React.FC<{
   >
     <span
       style={{
-        fontFamily: '"Arial Black", sans-serif',
-        fontWeight: 900,
+        fontFamily: displayFontFamily,
         fontSize,
         color: textColor,
         letterSpacing: 3,
@@ -78,7 +78,7 @@ export const Scoreboard: React.FC<{
         background: 'black',
         border: '3px solid white',
         color: 'white',
-        fontFamily: '"Arial Black", sans-serif',
+        fontFamily: displayFontFamily,
         fontSize: 34,
       }}
     >
@@ -123,7 +123,7 @@ export const TitlePill: React.FC<{text: string; fontSize?: number}> = ({
       borderRadius: 999,
       padding: '10px 40px',
       color: 'white',
-      fontFamily: '"Arial Black", sans-serif',
+      fontFamily: displayFontFamily,
       fontSize,
       letterSpacing: 4,
       whiteSpace: 'nowrap',

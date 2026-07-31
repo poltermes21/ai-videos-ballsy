@@ -26,6 +26,17 @@ const alignment = JSON.parse(
   await readFile(join(OUTPUT_DIR, `${matchId}-alignment.json`), 'utf8'),
 );
 
+// A graphic anchored to the exact start of its segment lands on the FIRST
+// word of the sentence — often well before the sentence actually reveals the
+// event (e.g. "Telstar get their own penalty... nah, that one's gone" only
+// confirms the miss at the very end). Delaying the reveal a bit into the
+// segment reads more like "setup, then payoff" instead of jumping the gun.
+const REVEAL_DELAY_FRACTION = 0.25; // fraction of the segment's own duration
+const REVEAL_DELAY_MAX_SECONDS = 1.2;
+// A graphic must survive at least this long even if its segment is unusually
+// short, so it never reads as a flash-frame.
+const MIN_DURATION_SECONDS = 3;
+
 // Flatten every tagged event across all key_moments into one chronological
 // list, each timed to the exact segment that narrates it — not just the
 // start of the whole moment, so a moment that bundles several events (e.g.
@@ -41,10 +52,17 @@ const taggedEvents = computeBlockStartTimes(script, alignment)
       (moment.event_type
         ? [{minute: moment.minute, event_type: moment.event_type, outcome: moment.outcome, segmentIndex: 0}]
         : []);
-    return legacyEvents.map((ev) => ({
-      ...ev,
-      startTime: b.segmentStartTimes?.[ev.segmentIndex] ?? b.startTime,
-    }));
+    return legacyEvents.map((ev) => {
+      const segStart = b.segmentStartTimes?.[ev.segmentIndex] ?? b.startTime;
+      const segEnd = b.segmentEndTimes?.[ev.segmentIndex] ?? segStart + MIN_DURATION_SECONDS;
+      const segDuration = Math.max(0, segEnd - segStart);
+      const delay = Math.min(segDuration * REVEAL_DELAY_FRACTION, REVEAL_DELAY_MAX_SECONDS);
+      const startTime = segStart + delay;
+      // Stays on screen until the segment actually finishes being spoken
+      // (never shorter than the floor), instead of a generic fixed duration.
+      const durationSeconds = Math.max(MIN_DURATION_SECONDS, segEnd - startTime);
+      return {...ev, startTime, durationSeconds};
+    });
   });
 
 // Real, structured events from SofaScore (already normalized + chronological).
@@ -116,6 +134,7 @@ for (const ev of taggedEvents) {
   const type = normalizeEventType(ev.event_type);
   const minute = ev.minute;
   const startTime = ev.startTime;
+  const durationSeconds = ev.durationSeconds;
 
   if (type === 'goal') {
     const matched = nearestEvent((e) => e.type === 'goal', minute);
@@ -126,6 +145,7 @@ for (const ev of taggedEvents) {
     graphicsTimeline.push({
       type: 'goal',
       startTime,
+      durationSeconds,
       props: {
         homeTeam,
         awayTeam,
@@ -145,6 +165,7 @@ for (const ev of taggedEvents) {
     graphicsTimeline.push({
       type: 'goalDisallowed',
       startTime,
+      durationSeconds,
       props: {homeTeam, awayTeam, homeScore: standing.home, awayScore: standing.away, scoringTeam},
     });
   } else if (type === 'yellow_card' || type === 'red_card') {
@@ -154,6 +175,7 @@ for (const ev of taggedEvents) {
     graphicsTimeline.push({
       type: 'card',
       startTime,
+      durationSeconds,
       props: {cardType, minute: matched?.minute ?? minute ?? 0},
     });
   } else if (type === 'penalty') {
@@ -185,6 +207,7 @@ for (const ev of taggedEvents) {
     graphicsTimeline.push({
       type: 'penalty',
       startTime,
+      durationSeconds,
       props: {outcome, homeTeam, awayTeam, ...scoreProps},
     });
   } else if (type === 'substitution') {
@@ -196,6 +219,7 @@ for (const ev of taggedEvents) {
     graphicsTimeline.push({
       type: 'substitution',
       startTime,
+      durationSeconds,
       props: {
         playerOnName: badgeName(sub.in?.name),
         playerOnNumber: sub.in?.number ?? 0,
@@ -204,11 +228,11 @@ for (const ev of taggedEvents) {
       },
     });
   } else if (type === 'var_review') {
-    graphicsTimeline.push({type: 'varReview', startTime, props: {}});
+    graphicsTimeline.push({type: 'varReview', startTime, durationSeconds, props: {}});
   } else if (type === 'clear_chance') {
     // Not a structured event — purely the model's read of the article text.
     const outcome = ev.outcome === 'clear_chance_post' ? 'post' : 'wide';
-    graphicsTimeline.push({type: 'clearChance', startTime, props: {outcome}});
+    graphicsTimeline.push({type: 'clearChance', startTime, durationSeconds, props: {outcome}});
   } else if (type) {
     console.warn(`Unrecognized event_type "${ev.event_type}" at minute ${minute}, skipping`);
   }
