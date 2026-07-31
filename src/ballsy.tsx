@@ -17,6 +17,7 @@ import type {
   RiveCanvas,
   SMIInput,
   StateMachineInstance,
+  WrappedRenderer,
 } from '@rive-app/canvas-advanced';
 import type {Caption} from '@remotion/captions';
 import {Captions} from './Captions';
@@ -35,6 +36,7 @@ type LoadedRive = {
   stateMachine: StateMachineInstance;
   visemeInput: SMIInput;
   expressionInput: SMIInput;
+  renderer: WrappedRenderer;
 };
 
 type MouthCue = {
@@ -261,9 +263,15 @@ export const Ballsy: React.FC = () => {
         );
       }
 
-      if (cancelled) {
+      if (cancelled || !canvasRef.current) {
         return;
       }
+
+      // Created once and reused every frame — calling makeRenderer() per
+      // frame (as this used to) leaked a new renderer each time since it was
+      // never deleted, which is why Studio playback got choppier the longer
+      // it played.
+      const renderer = riveCanvas.makeRenderer(canvasRef.current);
 
       loadedRef.current = {
         riveCanvas,
@@ -271,6 +279,7 @@ export const Ballsy: React.FC = () => {
         stateMachine,
         visemeInput,
         expressionInput,
+        renderer,
       };
       mouthCuesRef.current = lipSyncData.mouthCues;
       expressionCuesRef.current = expressionData.expressionCues;
@@ -283,6 +292,7 @@ export const Ballsy: React.FC = () => {
 
     return () => {
       cancelled = true;
+      loadedRef.current?.renderer.delete();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -292,7 +302,7 @@ export const Ballsy: React.FC = () => {
       return;
     }
 
-    const {riveCanvas, artboard, stateMachine, visemeInput, expressionInput} =
+    const {riveCanvas, artboard, stateMachine, visemeInput, expressionInput, renderer} =
       loadedRef.current;
 
     if (canvasRef.current.width !== width || canvasRef.current.height !== height) {
@@ -316,7 +326,6 @@ export const Ballsy: React.FC = () => {
     stateMachine.advanceAndApply(diffSeconds);
     artboard.advance(diffSeconds);
 
-    const renderer = riveCanvas.makeRenderer(canvasRef.current);
     renderer.clear();
     renderer.save();
     renderer.align(
@@ -402,14 +411,6 @@ export const Ballsy: React.FC = () => {
           height,
           translate: `${avatarX}px ${avatarY}px`,
           scale: avatarScale,
-          // The Rive canvas doesn't clear to true transparency (confirmed by
-          // swapping the page background and seeing the square tint shift
-          // with it) — it leaves a faint square the size of its own
-          // contain-fit bounding box. Harmless when Ballsy rendered behind
-          // graphics/on white, but visible now that Ballsy is on top and the
-          // page has a background. Clipping to a circle sized around the
-          // ball's own silhouette hides it without touching the Rive file.
-          clipPath: 'circle(34% at 50% 50%)',
         }}
       >
         <canvas ref={canvasRef} width={width} height={height} />
