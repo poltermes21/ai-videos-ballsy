@@ -52,3 +52,45 @@ export function getMatch(matchId) {
 export function listRound(tournamentId, seasonId, round) {
   return runSidecar(['list', String(tournamentId), String(seasonId), String(round)]);
 }
+
+/**
+ * The curated league list the picker opens on (scripts/sofascore/leagues.json).
+ * @returns {Array<{id:number, name:string, category:string}>}
+ */
+export function getLeagues() {
+  return runSidecar(['leagues']);
+}
+
+/**
+ * Search leagues/tournaments by free-text name (e.g. "premier league"),
+ * most-followed first.
+ * @returns {Array<{id:number, name:string, category:string, userCount:number}>}
+ */
+export function searchTournaments(query) {
+  return runSidecar(['search', query]);
+}
+
+/**
+ * Seasons of a tournament, newest first, plus the newest one that actually has
+ * finished matches (the newest season is often not started yet).
+ * @returns {{seasons: Array<{id:number, name:string, year:string}>,
+ *   defaultSeasonId: number|null}}
+ */
+export function getSeasons(tournamentId) {
+  return runSidecar(['seasons', String(tournamentId)]);
+}
+
+/**
+ * Finished matches of one round of a season, plus the season's round list.
+ * Omit `roundKey` to get the most recently played round.
+ * @returns {{rounds: Array<{key:string, round:number, name:string|null,
+ *   slug:string|null, prefix:string|null, label:string}>,
+ *   selectedRound: string|null,
+ *   matches: Array<{id:number, home:string, away:string, homeScore:number,
+ *     awayScore:number, round:number, date:number}>}}
+ */
+export function getSeasonMatches(tournamentId, seasonId, roundKey) {
+  const args = ['matches', String(tournamentId), String(seasonId)];
+  if (roundKey) args.push(String(roundKey));
+  return runSidecar(args);
+}

@@ -11,18 +11,34 @@ Usage:
       -> normalized match + events JSON to stdout
   python sofascore.py list <tournamentId> <seasonId> <round>
       -> finished matches of that round (id/teams/score/date) to stdout
+  python sofascore.py leagues
+      -> the curated league list (leagues.json) to stdout
+  python sofascore.py search <query>
+      -> leagues/tournaments matching the name (id/name/category) to stdout
+  python sofascore.py seasons <tournamentId>
+      -> {seasons: [...newest first], defaultSeasonId} to stdout
+  python sofascore.py matches <tournamentId> <seasonId> [roundKey]
+      -> {rounds, selectedRound, matches} for one round of that season
 
 Requires: curl_cffi  (pip install -r requirements.txt)
 """
 
 import json
+import os
 import random
+import re
 import sys
 import time
+from urllib.parse import quote
 
 from curl_cffi import requests as cffi
 
 BASE = "https://www.sofascore.com/api/v1"
+
+# Curated leagues the picker opens on — the reference scraper browses a fixed
+# list of tournament ids (its config/leagues.txt) instead of relying on a fuzzy
+# text search, which is both faster and immune to search ranking changes.
+LEAGUES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "leagues.json")
 
 HEADERS = {
     "Accept": "*/*",
@@ -330,6 +346,213 @@ def cmd_list(tournament_id, season_id, rnd):
     print(json.dumps(out, ensure_ascii=False, indent=2))
 
 
+def cmd_leagues():
+    """The curated league list the picker opens on (no network call)."""
+    try:
+        with open(LEAGUES_FILE, encoding="utf-8") as f:
+            leagues = json.load(f)
+    except (OSError, ValueError):
+        leagues = []
+    print(json.dumps(leagues, ensure_ascii=False, indent=2))
+
+
+def cmd_search(query):
+    """Leagues/tournaments matching a free-text name (for the league picker).
+
+    Uses the dedicated tournament-search endpoint (what the reference scraper
+    uses to add a league) rather than /search/all, whose mixed results — teams,
+    players, managers — have to be filtered by hand and rank inconsistently.
+    """
+    data = api_get(f"/search/unique-tournaments/{quote(query)}")
+    results = (data or {}).get("uniqueTournaments") or (data or {}).get("results") or []
+    out = []
+    for r in results:
+        e = r.get("entity", r) if isinstance(r, dict) else None
+        if not isinstance(e, dict) or not e.get("id"):
+            continue
+        out.append({
+            "id": e.get("id"),
+            "name": e.get("name"),
+            "category": (e.get("category") or {}).get("name"),
+            "userCount": e.get("userCount") or 0,
+        })
+    # Most-followed first — the league someone typed "premier" for is almost
+    # always the popular one, not a third-tier namesake.
+    out.sort(key=lambda x: x["userCount"], reverse=True)
+    print(json.dumps(out[:25], ensure_ascii=False, indent=2))
+
+
+def _sortable_year(year):
+    """Sortable number for a season's year string ("25/26", "2025", "99/00")."""
+    if not year:
+        return 0.0
+    year = str(year).strip()
+    if "/" in year:
+        start, _, end = year.partition("/")
+        start, end = start.strip(), end.strip()
+        if len(start) == 2 and len(end) == 2:
+            s, e = int(start), int(end)
+            # Century rollover: "99/00" is 2000, not 1999.
+            if s > e:
+                return 2000.0 + e
+            return (2000.0 + s) if s < 50 else (1900.0 + s)
+        if len(start) == 4:
+            return float(start)
+        try:
+            return float(start)
+        except ValueError:
+            return 0.0
+    try:
+        return float(year)
+    except ValueError:
+        m = re.search(r"20\d\d", year)
+        return float(m.group()) if m else 0.0
+
+
+def _season_has_finished(tournament_id, season_id):
+    """True if the season has at least one finished match.
+
+    A season with no played matches yet 404s on events/last, so this is one
+    cheap request per season.
+    """
+    data = api_get(f"/unique-tournament/{tournament_id}/season/{season_id}/events/last/0")
+    if not isinstance(data, dict):
+        return False
+    return any((e.get("status") or {}).get("type") == "finished" for e in data.get("events") or [])
+
+
+# How many of the newest seasons to probe when picking a default. The newest
+# season is very often the current, not-yet-started one; the reference scraper
+# has the same "fall back to the previous season" rule.
+SEASON_PROBE_LIMIT = 4
+
+
+def cmd_seasons(tournament_id):
+    """Seasons of a tournament, newest first, plus the one to select by default."""
+    data = api_get(f"/unique-tournament/{tournament_id}/seasons")
+    raw = (data or {}).get("seasons", [])
+    seasons = [{"id": s.get("id"), "name": s.get("name"), "year": s.get("year")} for s in raw]
+    seasons.sort(key=lambda s: _sortable_year(s["year"]), reverse=True)
+
+    default_id = seasons[0]["id"] if seasons else None
+    for season in seasons[:SEASON_PROBE_LIMIT]:
+        if _season_has_finished(tournament_id, season["id"]):
+            default_id = season["id"]
+            break
+
+    print(json.dumps({"seasons": seasons, "defaultSeasonId": default_id}, ensure_ascii=False, indent=2))
+
+
+def _round_key(r):
+    """Stable id for a round. Cups repeat round numbers (a "Round 1" in
+    qualifying and another in the league phase), so the slug/prefix are part
+    of the identity — and of the URL SofaScore needs to disambiguate them."""
+    return f"{r.get('round')}|{r.get('slug') or ''}|{r.get('prefix') or ''}"
+
+
+def _round_label(r):
+    parts = [p for p in (r.get("prefix"), r.get("name") or f"Round {r.get('round')}") if p]
+    return " ".join(parts)
+
+
+def _normalize_round(r):
+    if not isinstance(r, dict) or r.get("round") is None:
+        return None
+    out = {
+        "round": r.get("round"),
+        "name": r.get("name"),
+        "slug": r.get("slug"),
+        "prefix": r.get("prefix"),
+    }
+    out["key"] = _round_key(out)
+    out["label"] = _round_label(out)
+    return out
+
+
+def _round_path(tournament_id, season_id, r):
+    """events/round URL for a round. Named rounds 404 without their slug."""
+    path = f"/unique-tournament/{tournament_id}/season/{season_id}/events/round/{r['round']}"
+    if r.get("slug"):
+        path += f"/slug/{quote(str(r['slug']))}"
+    if r.get("prefix"):
+        path += f"/prefix/{quote(str(r['prefix']))}"
+    return path
+
+
+def _finished(events):
+    out = []
+    for ev in events or []:
+        if (ev.get("status") or {}).get("type") != "finished":
+            continue
+        out.append({
+            "id": ev.get("id"),
+            "home": (ev.get("homeTeam") or {}).get("name"),
+            "away": (ev.get("awayTeam") or {}).get("name"),
+            "homeScore": (ev.get("homeScore") or {}).get("current"),
+            "awayScore": (ev.get("awayScore") or {}).get("current"),
+            "round": (ev.get("roundInfo") or {}).get("round"),
+            "date": ev.get("startTimestamp"),
+        })
+    out.sort(key=lambda m: m["date"] or 0, reverse=True)
+    return out
+
+
+# When defaulting to a round, walk back this far from the current one looking
+# for played matches (mid-season the current round is often unplayed).
+ROUND_LOOKBACK = 6
+
+
+def cmd_matches(tournament_id, season_id, round_key=None):
+    """Finished matches of one round of a season, plus that season's rounds.
+
+    Round-by-round is how the reference scraper reads a season (the endpoint is
+    deterministic and matches how a league is actually organised), instead of
+    paging an opaque "last events" feed.
+    """
+    meta = api_get(f"/unique-tournament/{tournament_id}/season/{season_id}/rounds") or {}
+    rounds = []
+    seen = set()
+    for r in meta.get("rounds") or []:
+        norm = _normalize_round(r)
+        if norm and norm["key"] not in seen:
+            seen.add(norm["key"])
+            rounds.append(norm)
+
+    if not rounds:
+        # No round structure (friendlies, some cups) — fall back to the season's
+        # most recent events so the picker still shows something.
+        data = api_get(f"/unique-tournament/{tournament_id}/season/{season_id}/events/last/0")
+        events = data.get("events") if isinstance(data, dict) else []
+        print(json.dumps(
+            {"rounds": [], "selectedRound": None, "matches": _finished(events)},
+            ensure_ascii=False, indent=2,
+        ))
+        return
+
+    # Where to start looking: the requested round, else the current one.
+    start = len(rounds) - 1
+    if round_key:
+        start = next((i for i, r in enumerate(rounds) if r["key"] == round_key), start)
+    else:
+        current = _normalize_round(meta.get("currentRound"))
+        if current:
+            start = next((i for i, r in enumerate(rounds) if r["key"] == current["key"]), start)
+
+    selected, matches = rounds[start], []
+    limit = 1 if round_key else ROUND_LOOKBACK
+    for i in range(start, max(-1, start - limit), -1):
+        data = api_get(_round_path(tournament_id, season_id, rounds[i]))
+        found = _finished(data.get("events") if isinstance(data, dict) else [])
+        if found:
+            selected, matches = rounds[i], found
+            break
+
+    print(json.dumps(
+        {"rounds": rounds, "selectedRound": selected["key"], "matches": matches},
+        ensure_ascii=False, indent=2,
+    ))
+
+
 def main():
     # Force UTF-8 stdout so non-ASCII player names don't crash on Windows cp1252.
     try:
@@ -344,6 +567,14 @@ def main():
         cmd_fetch(args[1])
     elif cmd == "list" and len(args) == 4:
         cmd_list(args[1], args[2], args[3])
+    elif cmd == "leagues" and len(args) == 1:
+        cmd_leagues()
+    elif cmd == "search" and len(args) == 2:
+        cmd_search(args[1])
+    elif cmd == "seasons" and len(args) == 2:
+        cmd_seasons(args[1])
+    elif cmd == "matches" and len(args) in (3, 4):
+        cmd_matches(args[1], args[2], args[3] if len(args) == 4 else None)
     else:
         raise SystemExit(__doc__)
 

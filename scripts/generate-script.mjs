@@ -308,9 +308,25 @@ script.key_moments.forEach((moment, i) => {
 
 await mkdir(OUTPUT_DIR, {recursive: true});
 const outputPath = join(OUTPUT_DIR, `${matchId}.json`);
+// Match metadata is already fetched above for the LLM payload — persisting a
+// compact copy here means a library/listing view can render "Team A vs Team
+// B" rows straight off local files, with no extra SofaScore calls.
+const matchInfo = {
+  home: match.home,
+  away: match.away,
+  homeScore: match.homeScore,
+  awayScore: match.awayScore,
+  tournament: match.tournament,
+  season: match.season,
+  date: match.date,
+};
 await writeFile(
   outputPath,
-  JSON.stringify({reviewStatus: 'pending', reviewedAt: null, script}, null, 2),
+  JSON.stringify(
+    {matchId, matchInfo, reviewStatus: 'pending', reviewedAt: null, script},
+    null,
+    2,
+  ),
 );
 
 const allText = blocksWithSegments

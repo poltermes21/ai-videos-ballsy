@@ -1,0 +1,16 @@
+[
+  {"id": 17, "name": "Premier League", "category": "England"},
+  {"id": 8, "name": "LaLiga", "category": "Spain"},
+  {"id": 23, "name": "Serie A", "category": "Italy"},
+  {"id": 35, "name": "Bundesliga", "category": "Germany"},
+  {"id": 34, "name": "Ligue 1", "category": "France"},
+  {"id": 238, "name": "Liga Portugal", "category": "Portugal"},
+  {"id": 37, "name": "Eredivisie", "category": "Netherlands"},
+  {"id": 52, "name": "Süper Lig", "category": "Turkey"},
+  {"id": 7, "name": "UEFA Champions League", "category": "Europe"},
+  {"id": 679, "name": "UEFA Europa League", "category": "Europe"},
+  {"id": 325, "name": "Brasileirão", "category": "Brazil"},
+  {"id": 384, "name": "CONMEBOL Libertadores", "category": "South America"},
+  {"id": 242, "name": "MLS", "category": "USA"},
+  {"id": 955, "name": "Saudi Pro League", "category": "Saudi Arabia"}
+]

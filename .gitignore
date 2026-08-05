@@ -38,3 +38,7 @@ scripts/output/
 scripts/sofascore/.venv/
 __pycache__/
 *.pyc
+
+# Match selector frontend — compiled from scripts/server/src/*.ts
+scripts/server/public/app.js
+scripts/server/public/app.js.map

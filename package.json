@@ -12,6 +12,7 @@
     "@remotion/google-fonts": "4.0.489",
     "@remotion/rive": "^4.0.489",
     "@remotion/tailwind-v4": "4.0.489",
+    "express": "^5.2.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "remotion": "4.0.489",
@@ -30,7 +31,8 @@
     "dev": "remotion studio",
     "build": "remotion bundle",
     "upgrade": "remotion upgrade",
-    "lint": "eslint src && tsc"
+    "lint": "eslint src && tsc",
+    "selector": "tsc -p scripts/server/tsconfig.json && node --env-file=.env scripts/server/index.mjs"
   },
   "sideEffects": [
     "*.css"
