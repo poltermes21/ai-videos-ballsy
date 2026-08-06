@@ -1,4 +1,3 @@
-import "./index.css";
 import { CalculateMetadataFunction, Composition, staticFile } from "remotion";
 import { Ballsy, FIXTURE_ID } from "./ballsy";
 import { GoalGraphic } from "./graphics/GoalGraphic";

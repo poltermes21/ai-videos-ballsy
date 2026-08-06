@@ -244,9 +244,8 @@ const matchData = {
     ...(e.outcome ? {penaltyOutcome: e.outcome} : {}),
     ...(e.cardType ? {cardType: e.cardType} : {}),
     // `confirmed` is critical, not decorative — see the VAR_REVIEW SEMANTICS
-    // note below. Dropping it (as an earlier version of this mapping did)
-    // caused the model to misread an overturned "penaltyNotAwarded" as a
-    // final "no penalty", when the match data showed the opposite happened.
+    // note below. Without it the model can't tell an overturned decision
+    // ("penaltyNotAwarded" + confirmed:false) from a final one.
     ...(e.decision ? {varDecision: e.decision, varConfirmed: e.confirmed} : {}),
     ...(e.in ? {playerIn: e.in.name, playerOut: e.out?.name} : {}),
     ...(e.homeScore != null ? {score: `${e.homeScore}-${e.awayScore}`} : {}),

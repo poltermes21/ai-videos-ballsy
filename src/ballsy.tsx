@@ -157,28 +157,22 @@ const RHUBARB_TO_VISEME: Record<string, number> = {
   B: 8, // etc — other consonants
 };
 
-const findViseme = (
-  mouthCues: MouthCue[],
-  timeSeconds: number,
-): {index: number; letter: string} => {
+const findViseme = (mouthCues: MouthCue[], timeSeconds: number): {index: number} => {
   for (const cue of mouthCues) {
     if (timeSeconds >= cue.start && timeSeconds < cue.end) {
-      return {index: RHUBARB_TO_VISEME[cue.value] ?? 0, letter: cue.value};
+      return {index: RHUBARB_TO_VISEME[cue.value] ?? 0};
     }
   }
-  return {index: 0, letter: 'X'};
+  return {index: 0};
 };
 
-const findExpression = (
-  expressionCues: ExpressionCue[],
-  timeSeconds: number,
-): {index: number; name: string} => {
+const findExpression = (expressionCues: ExpressionCue[], timeSeconds: number): {index: number} => {
   for (const cue of expressionCues) {
     if (timeSeconds >= cue.start && timeSeconds < cue.end) {
-      return {index: EXPRESSION_TO_INDEX[cue.expression] ?? 0, name: cue.expression};
+      return {index: EXPRESSION_TO_INDEX[cue.expression] ?? 0};
     }
   }
-  return {index: 0, name: 'neutral'};
+  return {index: 0};
 };
 
 export const Ballsy: React.FC = () => {
@@ -196,11 +190,6 @@ export const Ballsy: React.FC = () => {
   const [graphicsTimeline, setGraphicsTimeline] = useState<GraphicsEntry[]>([]);
   const [avatarKeyframes, setAvatarKeyframes] = useState<AvatarKeyframe[]>([]);
   const [captions, setCaptions] = useState<Caption[]>([]);
-  const [debugInfo, setDebugInfo] = useState<{
-    letter: string;
-    visemeIndex: number;
-    expressionName: string;
-  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -267,10 +256,8 @@ export const Ballsy: React.FC = () => {
         return;
       }
 
-      // Created once and reused every frame — calling makeRenderer() per
-      // frame (as this used to) leaked a new renderer each time since it was
-      // never deleted, which is why Studio playback got choppier the longer
-      // it played.
+      // Created once and reused every frame — never call makeRenderer() per
+      // frame, it allocates a new renderer that's never deleted.
       const renderer = riveCanvas.makeRenderer(canvasRef.current);
 
       loadedRef.current = {
@@ -311,16 +298,11 @@ export const Ballsy: React.FC = () => {
     }
 
     const timeSeconds = frame / fps;
-    const {index: visemeIndex, letter} = findViseme(mouthCuesRef.current, timeSeconds);
+    const {index: visemeIndex} = findViseme(mouthCuesRef.current, timeSeconds);
     visemeInput.value = visemeIndex;
 
-    const {index: expressionIndex, name: expressionName} = findExpression(
-      expressionCuesRef.current,
-      timeSeconds,
-    );
+    const {index: expressionIndex} = findExpression(expressionCuesRef.current, timeSeconds);
     expressionInput.value = expressionIndex;
-
-    setDebugInfo({letter, visemeIndex, expressionName});
 
     const diffSeconds = Math.max(frame - lastFrameRef.current, 0) / fps;
     stateMachine.advanceAndApply(diffSeconds);
@@ -402,8 +384,7 @@ export const Ballsy: React.FC = () => {
           </Sequence>
         );
       })}
-      {/* Renders after (on top of) the event graphics, per feedback: Ballsy
-          should sit in front of the animations, not behind them. */}
+      {/* Renders after the event graphics so Ballsy sits in front of them. */}
       <div
         style={{
           position: 'absolute',
@@ -416,24 +397,6 @@ export const Ballsy: React.FC = () => {
         <canvas ref={canvasRef} width={width} height={height} />
       </div>
       <Captions captions={captions} />
-      <div
-        style={{
-          position: 'absolute',
-          top: 16,
-          left: 16,
-          padding: '4px 8px',
-          background: 'rgba(0,0,0,0.6)',
-          color: 'white',
-          fontFamily: 'monospace',
-          fontSize: 20,
-        }}
-      >
-        frame {frame} | t={timeSecondsLabel(frame, fps)}s | rhubarb=
-        {debugInfo?.letter ?? '-'} viseme {debugInfo?.visemeIndex ?? '-'} | expression{' '}
-        {debugInfo?.expressionName ?? '-'}
-      </div>
     </AbsoluteFill>
   );
 };
-
-const timeSecondsLabel = (frame: number, fps: number) => (frame / fps).toFixed(2);

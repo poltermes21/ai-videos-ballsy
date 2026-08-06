@@ -230,18 +230,13 @@ function getExistingScript(matchId: string): Promise<ScriptResponse | null> {
 function getMatchInfo(matchId: string): Promise<FullMatchInfo> {
   return apiGet(`/api/match-info/${matchId}`);
 }
-// Script generations in flight, keyed by match id, shared across page renders.
-//
-// This is deliberately module-level rather than per-page state. Generating a
-// script takes ~30s, and this app never unloads the document — navigating away
-// from /match/:id just wipes #app and builds a new page, leaving the old
-// page's `await` resolving into DOM nodes nobody can see any more. The server
-// finishes the generation regardless of whether the client is still listening
-// (execFileAsync isn't cancelled by a disconnect), so the run really is still
-// happening; keeping the promise here means coming back to the match re-joins
-// that same run — showing "Generating script..." and then the real result —
-// instead of offering a "Generate script" button that would spend on Anthropic
-// a second time for a script that is already being written.
+// Script generations in flight, keyed by match id — module-level (not
+// per-page state) because this app never unloads the document; navigating
+// away just wipes #app and builds a new page, but the server keeps running
+// the generation regardless. Keeping the promise here lets coming back to
+// the match re-join that same run instead of offering a "Generate script"
+// button that would spend on Anthropic a second time for a script already
+// being written.
 const inFlightScriptGenerations = new Map<string, Promise<{script: Script}>>();
 
 function isGeneratingScript(matchId: string): boolean {
@@ -268,12 +263,10 @@ function launchStudio(): Promise<{ok: true; alreadyRunning: boolean}> {
 }
 const STUDIO_URL = 'http://localhost:3000';
 
-// Pipeline runs in flight, for the same reason as inFlightScriptGenerations
-// above — and with more at stake, since the first step of this chain is the
-// paid ElevenLabs call. Navigating away mid-run left the SSE stream writing
-// into a detached log and the match still looking like it had no audio, so
-// coming back offered "Generate audio and data" again. Re-attaching to the
-// live run instead keeps one run per match.
+// Pipeline runs in flight, same reason as inFlightScriptGenerations above —
+// and higher stakes, since the first step is the paid ElevenLabs call.
+// Re-attaching to the live run (rather than losing track of it on navigation)
+// keeps this to one run per match.
 type PipelineRun = {
   log: string;
   status: 'running' | 'done' | 'error';
@@ -888,11 +881,9 @@ function renderMatchDetail(matchId: string): void {
   // one. Pulled from the same SofaScore data generate-script.mjs uses, so
   // there's nothing new to fetch, just somewhere to show it first.
   function renderMatchInfo(info: FullMatchInfo): void {
-    // The page title used to only update once a script existed (inside the
-    // getExistingScript branch below) — fine coming from History, where a
-    // script always exists, but coming from the match picker (no script yet)
-    // it was stuck on "Match 14081810" the whole time. This call succeeds for
-    // any valid match regardless of script status, so set it from here too.
+    // Set here rather than only in the getExistingScript branch below, so a
+    // freshly-picked match with no script yet still gets real team names
+    // instead of showing the raw match id as the title.
     const compactInfo: MatchInfo = {
       home: info.home,
       away: info.away,
