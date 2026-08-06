@@ -419,3 +419,13 @@ input[type="text"]:focus, select:focus { outline: 2px solid var(--accent); outli
   color: var(--text-muted);
 }
 .status-strip .match-card-next { padding-top: 0; border-top: none; }
+
+/* Rendered video — played straight from the match page. */
+.video-player {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+  border-radius: var(--radius-sm);
+  background: black;
+}

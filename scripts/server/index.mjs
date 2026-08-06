@@ -67,13 +67,15 @@ async function readScriptFile(fixtureId) {
 // by hand in src/ballsy.tsx after picking a new match.
 async function setFixtureId(fixtureId) {
   const contents = await readFile(BALLSY_TSX, 'utf8');
-  const updated = contents.replace(
-    /export const FIXTURE_ID = '[^']*';/,
-    `export const FIXTURE_ID = '${fixtureId}';`,
-  );
-  if (updated === contents) {
+  const pattern = /export const FIXTURE_ID = '[^']*';/;
+  // Checked separately from the replace() call below: re-pointing at the
+  // fixture that's already current produces a byte-identical string (not a
+  // failed match), which `updated === contents` used to mistake for "pattern
+  // not found" and throw on every re-render of the same match.
+  if (!pattern.test(contents)) {
     throw new Error('Could not find FIXTURE_ID assignment in src/ballsy.tsx to update.');
   }
+  const updated = contents.replace(pattern, `export const FIXTURE_ID = '${fixtureId}';`);
   await writeFile(BALLSY_TSX, updated);
 }
 
@@ -164,6 +166,9 @@ function backfillMatchInfo(matchId) {
 const app = express();
 app.use(express.json());
 app.use(express.static(join(SERVER_DIR, 'public')));
+// Rendered videos (out/<matchId>.mp4) — served so the match page can play or
+// link to them directly instead of just reporting a filesystem path.
+app.use('/videos', express.static(OUT_DIR));
 
 // Without ?q= this is the curated league list you browse (leagues.json); with
 // one it searches SofaScore for anything not on that list.
@@ -444,7 +449,15 @@ app.get('/api/render', async (req, res) => {
 
     await new Promise((resolve, reject) => {
       // shell:true so `npx` resolves correctly on Windows via spawn.
-      const child = spawn('npx', ['remotion', 'render', 'Ballsy', outPath], {
+      // --concurrency=1: Ballsy's idle animation is driven by Rive's stateful
+      // advanceAndApply(), which assumes it's called once per frame in
+      // strict sequence. Remotion's default concurrency renders in several
+      // parallel processes, each starting mid-timeline with no memory of
+      // what came before — confirmed (via frame-diff analysis of a real
+      // render) to cause small discontinuities in Ballsy's idle motion at
+      // the seams. Single-process rendering is slower but avoids this
+      // category of bug entirely rather than papering over one seam at a time.
+      const child = spawn('npx', ['remotion', 'render', 'Ballsy', outPath, '--concurrency=1'], {
         cwd: REPO_ROOT,
         shell: true,
       });

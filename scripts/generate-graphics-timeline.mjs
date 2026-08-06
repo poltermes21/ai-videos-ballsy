@@ -65,6 +65,29 @@ const taggedEvents = computeBlockStartTimes(script, alignment)
     });
   });
 
+// A moment can bundle multiple events into one narrated line (e.g. "VAR
+// reviews it... and it's a red card" as a single sentence) — those events
+// share the same segment and would otherwise get identical start/end times,
+// rendering two full-screen graphics on top of each other. taggedEvents is
+// already chronological (segments never overlap in speech time), so the
+// only way two entries can overlap is if they share a segment, or a very
+// short segment's MIN_DURATION_SECONDS floor pushes it into the next one —
+// either way, give each its own slice of the shared window, in narration
+// order, instead of stacking them.
+for (let i = 0; i < taggedEvents.length - 1; i++) {
+  const current = taggedEvents[i];
+  const next = taggedEvents[i + 1];
+  const currentEnd = current.startTime + current.durationSeconds;
+  if (next.startTime >= currentEnd) continue; // already sequential
+
+  const windowStart = current.startTime;
+  const windowEnd = Math.max(currentEnd, next.startTime + next.durationSeconds);
+  const half = (windowEnd - windowStart) / 2;
+  current.durationSeconds = Math.max(MIN_DURATION_SECONDS, half);
+  next.startTime = windowStart + current.durationSeconds;
+  next.durationSeconds = Math.max(MIN_DURATION_SECONDS, windowEnd - next.startTime);
+}
+
 // Real, structured events from SofaScore (already normalized + chronological).
 const match = getMatch(matchId);
 // Prefer SofaScore's own 3-letter code; fall back to first 3 letters of the name.
@@ -169,9 +192,15 @@ for (const ev of taggedEvents) {
       props: {homeTeam, awayTeam, homeScore: standing.home, awayScore: standing.away, scoringTeam},
     });
   } else if (type === 'yellow_card' || type === 'red_card') {
-    const matched = nearestEvent((e) => e.type === 'card', minute);
-    // Trust the data for the card colour when we found the event.
-    const cardType = matched?.cardType ?? (type === 'red_card' ? 'red' : 'yellow');
+    const wantedCardType = type === 'red_card' ? 'red' : 'yellow';
+    // Cards often cluster in the same minute (a flashpoint draws several
+    // bookings at once) — nearest-by-minute alone can't tell them apart, so
+    // prefer a real event whose colour agrees with what the script already
+    // tagged, and only fall back to "just the nearest card" if none matches.
+    const matched =
+      nearestEvent((e) => e.type === 'card' && e.cardType === wantedCardType, minute) ??
+      nearestEvent((e) => e.type === 'card', minute);
+    const cardType = matched?.cardType ?? wantedCardType;
     graphicsTimeline.push({
       type: 'card',
       startTime,

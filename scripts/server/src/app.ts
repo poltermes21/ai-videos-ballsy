@@ -863,6 +863,7 @@ function renderMatchDetail(matchId: string): void {
   ]);
   const pipelineSection = h('div', {class: 'section hidden'});
   const renderSection = h('div', {class: 'section hidden'});
+  const videoSection = h('div', {class: 'section hidden'});
 
   app.append(
     h('div', {class: 'page'}, [
@@ -870,6 +871,7 @@ function renderMatchDetail(matchId: string): void {
       header,
       subtitle,
       statusStrip,
+      videoSection,
       matchInfoSection,
       generateSection,
       scriptView,
@@ -1007,6 +1009,21 @@ function renderMatchDetail(matchId: string): void {
         matchInfoSection.innerHTML = '';
         matchInfoSection.append(errorBanner(`Could not load match report: ${(err as Error).message}`));
       });
+  }
+
+  // The rendered file, playable and downloadable straight from the page —
+  // out/<matchId>.mp4 is served at /videos/<matchId>.mp4 (see index.mjs).
+  // Cache-busted with the current time so re-rendering the same match shows
+  // the new file instead of the browser's cached copy of the old one.
+  function showVideo(): void {
+    videoSection.innerHTML = '';
+    videoSection.classList.remove('hidden');
+    const src = `/videos/${matchId}.mp4?t=${Date.now()}`;
+    const video = h('video', {controls: 'true', class: 'video-player', src});
+    const downloadLink = h('a', {href: src, download: `${matchId}.mp4`, class: 'btn ghost mt-sm'}, [
+      'Download video',
+    ]);
+    videoSection.append(h('div', {class: 'card'}, [video, downloadLink]));
   }
 
   // Same chips + "next step" wording as the History cards, so arriving from a
@@ -1276,7 +1293,8 @@ function renderMatchDetail(matchId: string): void {
         state.hasVideo = true;
         updateStatusStrip();
         renderActions();
-        renderSection.append(h('p', {class: 'hint mt-md'}, [`Video saved to ${msg.path}`]));
+        showVideo();
+        renderSection.append(h('p', {class: 'hint mt-md'}, [`Saved to ${msg.path}`]));
         source.close();
       } else if (msg.type === 'error') {
         log.textContent += '\nError: ' + msg.message + '\n';
@@ -1357,6 +1375,7 @@ function renderMatchDetail(matchId: string): void {
         scriptView.classList.remove('hidden');
         updateStatusStrip();
         renderActions();
+        if (data.hasVideo) showVideo();
       }
 
       // A run started before the user navigated away is still going on the
