@@ -130,7 +130,7 @@ const EXPRESSION_INPUT_NAME = 'expression';
 // SofaScore event id (Eredivisie 25/26 — SC Telstar 2-2 Excelsior). Exported
 // so Root.tsx's calculateMetadata can size the composition to this fixture's
 // real audio length without duplicating the id.
-export const FIXTURE_ID = '14053814';
+export const FIXTURE_ID = '14081810';
 
 const EXPRESSION_NAMES = [
   'neutral',
