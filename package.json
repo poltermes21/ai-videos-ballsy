@@ -12,6 +12,7 @@
     "@remotion/google-fonts": "4.0.489",
     "@rive-app/canvas-advanced": "^2.31.5",
     "express": "^5.2.1",
+    "googleapis": "^181.0.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "remotion": "4.0.489",

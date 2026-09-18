@@ -4,6 +4,14 @@
 // match opens a real page with working browser back/forward), no framework —
 // this tool is simple enough that React/etc. would be pure overhead. Compiled
 // to public/app.js by `tsc -p scripts/server/tsconfig.json` (see package.json).
+//
+// The two publish-UI modules are the one deliberate exception to keeping
+// this a single file: each is owned entirely by its own platform's
+// integration (see scripts/server/publish-youtube.mjs / publish-tiktok.mjs
+// on the server side), so building/reviewing one never touches the other's
+// code.
+import {renderYoutubePublishBlock} from './youtube-publish-ui.js';
+import {renderTiktokPublishBlock} from './tiktok-publish-ui.js';
 
 // ---------------------------------------------------------------------------
 // Types (mirror the shapes returned by scripts/server/index.mjs)
@@ -40,6 +48,13 @@ type MatchInfo = {
   date: number | null;
 };
 type ReviewStatus = 'pending' | 'approved' | 'rejected';
+
+// Publish status persisted alongside the script — null until that platform's
+// "Publish" button has actually succeeded once for this match.
+type YoutubePublishStatus = {videoId: string; url: string; privacyStatus: string; publishedAt: string} | null;
+type TiktokPublishStatus = {publishId: string; privacyLevel: string; publishedAt: string} | null;
+type PublishMetadata = {title: string; description: string; hashtags: string[]};
+
 type LibraryEntry = {
   matchId: string;
   matchInfo: MatchInfo | null;
@@ -47,14 +62,19 @@ type LibraryEntry = {
   reviewedAt: string | null;
   hasAudio: boolean;
   hasVideo: boolean;
+  youtube: YoutubePublishStatus;
+  tiktok: TiktokPublishStatus;
   updatedAt: string;
 };
 type ScriptResponse = {
   script: Script;
+  publishMetadata: PublishMetadata | null;
   reviewStatus: ReviewStatus;
   matchInfo: MatchInfo | null;
   hasAudio: boolean;
   hasVideo: boolean;
+  youtube: YoutubePublishStatus;
+  tiktok: TiktokPublishStatus;
 };
 
 // Full match report from the SofaScore sidecar (scripts/sofascore/sofascore.py
@@ -612,7 +632,13 @@ function renderHome(): void {
 // actually land on.
 // ---------------------------------------------------------------------------
 
-type PipelineState = {reviewStatus: ReviewStatus | null; hasAudio: boolean; hasVideo: boolean};
+type PipelineState = {
+  reviewStatus: ReviewStatus | null;
+  hasAudio: boolean;
+  hasVideo: boolean;
+  youtube: YoutubePublishStatus;
+  tiktok: TiktokPublishStatus;
+};
 type Stage = 'review' | 'rejected' | 'audio' | 'render' | 'done';
 
 // Review comes first even when audio/video already exist: if the script was
@@ -665,7 +691,13 @@ function pipelineChips(state: PipelineState): HTMLElement {
         ? chip('bad', '✗ Script rejected')
         : chip('warn', '! Script to review');
 
-  return h('div', {class: 'chips'}, [script, presence(state.hasAudio, 'Audio'), presence(state.hasVideo, 'Video')]);
+  return h('div', {class: 'chips'}, [
+    script,
+    presence(state.hasAudio, 'Audio'),
+    presence(state.hasVideo, 'Video'),
+    presence(state.youtube !== null, 'YouTube'),
+    presence(state.tiktok !== null, 'TikTok'),
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -826,11 +858,20 @@ function renderMatchDetail(matchId: string): void {
   const pageEpoch = renderEpoch;
   const isStale = (): boolean => pageEpoch !== renderEpoch;
 
-  const state: PipelineState = {reviewStatus: null, hasAudio: false, hasVideo: false};
+  const state: PipelineState = {
+    reviewStatus: null,
+    hasAudio: false,
+    hasVideo: false,
+    youtube: null,
+    tiktok: null,
+  };
   // The script currently on screen, mutated in place as the user edits it —
   // Save/Approve both send this exact object back to the server.
   let currentScript: Script | null = null;
   let scriptDirty = false;
+  // Title/description/hashtags generated alongside the script — read by both
+  // publish blocks, never edited here (regenerate the script to change it).
+  let currentPublishMetadata: PublishMetadata | null = null;
 
   const backLink = h('a', {href: '#', class: 'back-link'}, ['← Back']);
   backLink.addEventListener('click', (e) => {
@@ -839,8 +880,9 @@ function renderMatchDetail(matchId: string): void {
   });
 
   const title = h('h1', {class: 'page-title'}, [`Match ${matchId}`]);
+  const matchIdLabel = h('span', {class: 'match-id-label'}, [`ID ${matchId}`]);
   const subtitle = h('p', {class: 'hint'});
-  const header = h('div', {class: 'workspace-header'}, [title]);
+  const header = h('div', {class: 'workspace-header'}, [title, matchIdLabel]);
   const statusStrip = h('div', {class: 'status-strip hidden'});
 
   const matchInfoSection = h('div', {class: 'section'});
@@ -857,6 +899,9 @@ function renderMatchDetail(matchId: string): void {
   const pipelineSection = h('div', {class: 'section hidden'});
   const renderSection = h('div', {class: 'section hidden'});
   const videoSection = h('div', {class: 'section hidden'});
+  // Filled by renderYoutubePublishBlock()/renderTiktokPublishBlock() once a
+  // video exists — each platform's own module owns everything inside it.
+  const publishSection = h('div', {class: 'section hidden'});
 
   app.append(
     h('div', {class: 'page'}, [
@@ -865,6 +910,7 @@ function renderMatchDetail(matchId: string): void {
       subtitle,
       statusStrip,
       videoSection,
+      publishSection,
       matchInfoSection,
       generateSection,
       scriptView,
@@ -1015,6 +1061,24 @@ function renderMatchDetail(matchId: string): void {
       'Download video',
     ]);
     videoSection.append(h('div', {class: 'card'}, [video, downloadLink]));
+  }
+
+  // Each block manages its own connect/publish/published states entirely —
+  // this function just decides WHEN to (re)draw them: once a video exists,
+  // and again whenever a publish completes so the "published" state shows.
+  function showPublishSection(): void {
+    publishSection.innerHTML = '';
+    publishSection.classList.remove('hidden');
+    publishSection.append(
+      renderYoutubePublishBlock(matchId, state.youtube, currentPublishMetadata, (published) => {
+        state.youtube = published;
+        updateStatusStrip();
+      }),
+      renderTiktokPublishBlock(matchId, state.tiktok, currentPublishMetadata, (published) => {
+        state.tiktok = published;
+        updateStatusStrip();
+      }),
+    );
   }
 
   // Same chips + "next step" wording as the History cards, so arriving from a
@@ -1285,6 +1349,7 @@ function renderMatchDetail(matchId: string): void {
         updateStatusStrip();
         renderActions();
         showVideo();
+        showPublishSection();
         renderSection.append(h('p', {class: 'hint mt-md'}, [`Saved to ${msg.path}`]));
         source.close();
       } else if (msg.type === 'error') {
@@ -1360,13 +1425,19 @@ function renderMatchDetail(matchId: string): void {
         state.reviewStatus = data.reviewStatus;
         state.hasAudio = data.hasAudio;
         state.hasVideo = data.hasVideo;
+        state.youtube = data.youtube;
+        state.tiktok = data.tiktok;
+        currentPublishMetadata = data.publishMetadata;
         title.textContent = matchTitle(data.matchInfo, matchId);
         subtitle.textContent = matchSubtitle(data.matchInfo);
         renderScriptBlocks(data.script);
         scriptView.classList.remove('hidden');
         updateStatusStrip();
         renderActions();
-        if (data.hasVideo) showVideo();
+        if (data.hasVideo) {
+          showVideo();
+          showPublishSection();
+        }
       }
 
       // A run started before the user navigated away is still going on the

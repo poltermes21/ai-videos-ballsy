@@ -157,10 +157,17 @@ input[type="text"]:focus, select:focus { outline: 2px solid var(--accent); outli
 .workspace-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.7rem;
   margin-bottom: 1.2rem;
 }
 .workspace-header h1 { margin: 0; }
+.match-id-label {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: nowrap;
+}
 
 .back-link {
   display: inline-block;
@@ -248,7 +255,11 @@ input[type="text"]:focus, select:focus { outline: 2px solid var(--accent); outli
 }
 
 .section { margin-bottom: 1.4rem; }
-.hidden { display: none; }
+/* !important: this utility is meant to win regardless of any other rule's
+   source order (e.g. .pickers below sets its own display: flex) — a plain
+   .hidden would silently lose that tie whenever the other class happens to
+   be declared later in the file. */
+.hidden { display: none !important; }
 .mt-sm { margin-top: 0.6rem; }
 .mt-md { margin-top: 0.8rem; }
 .mt-lg { margin-top: 1rem; }
@@ -429,3 +440,117 @@ input[type="text"]:focus, select:focus { outline: 2px solid var(--accent); outli
   border-radius: var(--radius-sm);
   background: black;
 }
+
+/* YouTube publish UI — owned by scripts/server/src/youtube-publish-ui.ts.
+   Prefix any new class with yt-publish- and add rules only below this line,
+   never above it, so a parallel edit to the TikTok block below never touches
+   the same lines. */
+
+.yt-publish-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.8rem;
+}
+.yt-publish-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.yt-publish-select {
+  padding: 0.5rem 0.6rem;
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.yt-publish-preview {
+  border-left: 2px solid var(--border);
+  padding-left: 0.8rem;
+}
+.yt-publish-preview-title {
+  margin: 0 0 0.2rem;
+  font-weight: 600;
+}
+.yt-publish-preview .hint { margin-bottom: 0.3rem; }
+.yt-publish-tags { color: var(--accent); }
+.yt-publish-status { margin: 0.7rem 0 0.4rem; }
+/* Upload progress — a plain bar rather than the scrolling log the render step
+   uses, since there's nothing to read here, only a percentage. */
+.yt-publish-bar {
+  display: block;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-hover);
+  overflow: hidden;
+}
+.yt-publish-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+.yt-publish-done {
+  margin: 0 0 0.3rem;
+  font-weight: 600;
+  color: var(--success-text);
+}
+.yt-publish-done a { color: inherit; }
+
+/* TikTok publish UI — owned by scripts/server/src/tiktok-publish-ui.ts.
+   Prefix any new class with tiktok-publish- and add rules only below this
+   line, never above it, for the same reason. */
+.tiktok-publish-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.7rem;
+}
+.tiktok-publish-name {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.tiktok-publish-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: var(--radius-sm);
+  background: var(--text);
+  color: var(--surface);
+  font-size: 0.8rem;
+  line-height: 1;
+}
+/* The caption exactly as it will be posted — hashtags included, since TikTok
+   has no separate description field for a direct post. */
+.tiktok-publish-preview {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 0.6rem 0.7rem;
+  margin-bottom: 0.7rem;
+}
+.tiktok-publish-caption {
+  font-size: 0.88rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tiktok-publish-done {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--success-text);
+}
+.tiktok-publish-meta {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+.tiktok-publish-log { margin-top: 0.7rem; max-height: 180px; }

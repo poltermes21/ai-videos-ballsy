@@ -39,6 +39,10 @@ scripts/sofascore/.venv/
 __pycache__/
 *.pyc
 
-# Match selector frontend — compiled from scripts/server/src/*.ts
-scripts/server/public/app.js
-scripts/server/public/app.js.map
+# Match selector frontend — compiled from scripts/server/src/*.ts (every
+# entry point: app.ts, youtube-publish-ui.ts, tiktok-publish-ui.ts, ...).
+scripts/server/public/*.js
+scripts/server/public/*.js.map
+
+# OAuth refresh tokens for YouTube/TikTok publishing — real credentials.
+scripts/server/.credentials/

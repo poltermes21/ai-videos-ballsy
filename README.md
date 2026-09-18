@@ -142,3 +142,148 @@ scripts/                   the data/generation pipeline (run outside Remotion)
 The build order described in earlier project notes is complete: match data
 → script → audio/lip-sync → event graphics → the Ballsy Studio picker/review/
 render UI.
+
+## Publishing to TikTok (optional)
+
+Once a match has a rendered video, its page in Ballsy Studio shows a **TikTok**
+block that can post the `.mp4` straight to your account. It's entirely
+optional — skip this whole section and everything else still works; you just
+download the file and upload it by hand.
+
+> ### ⚠️ Videos publish as **private (self-only)**, and that is not a setting
+>
+> TikTok only lets an app post publicly **after that app has passed TikTok's
+> own manual content-posting audit**. Until then, the Content Posting API
+> accepts exactly one visibility — `SELF_ONLY` — so every video published from
+> here lands on your profile visible only to you. Ballsy hardcodes that value
+> rather than offering a visibility dropdown, because every other value would
+> be rejected.
+>
+> To lift it, request the audit for your app in the TikTok for Developers
+> portal *after* this integration is working (they want to see it functioning).
+> **Approval is on TikTok's timeline, not this project's** — there's no way to
+> speed it up from here, and no guarantee of a date. Until it lands, treat this
+> as "upload it privately, then flip it to public in the TikTok app yourself".
+
+Every video is also disclosed to TikTok as **AI-generated content**
+(`is_aigc: true`) on every publish. That's a standing policy of this project,
+not a toggle — the script is written by an LLM and the voice is synthetic.
+
+### Setup
+
+1. Register at [TikTok for Developers](https://developers.tiktok.com/) and log in.
+2. Create an app (**Manage apps → Connect an app**).
+3. Add both products to it:
+   - **Login Kit** — the OAuth flow that links your account.
+   - **Content Posting API** — the upload itself. Enable **Direct Post** on it.
+4. Request the **`video.publish`** scope for the app. (`video.upload` only
+   drops files in your TikTok inbox; Ballsy posts directly.)
+5. Under Login Kit, add this exact **redirect URI** — character for character,
+   including the port and trailing path:
+
+   ```
+   http://localhost:4321/api/publish/tiktok/callback
+   ```
+
+6. Copy the app's **Client Key** and **Client Secret** into your `.env`:
+
+   ```bash
+   TIKTOK_CLIENT_KEY=your_client_key
+   TIKTOK_CLIENT_SECRET=your_client_secret
+   ```
+
+7. Restart `npm run selector`, open a match that already has a rendered video,
+   and click **Connect TikTok** in the TikTok block. You'll approve access on
+   TikTok's site and get dropped back on the match page.
+
+The refresh token is stored in `scripts/server/.credentials/tiktok.json`, which
+is gitignored — it's a real credential for your account, so don't commit it or
+paste it anywhere. Deleting that file disconnects the account.
+
+### Publishing
+
+Click **Publish to TikTok**. The caption is the `title` + `hashtags` that were
+generated alongside the script (TikTok has no separate description field, so
+the hashtags ride along in the caption); the video uploads in chunks and the
+page streams progress, then waits for TikTok to finish processing before it
+reports success. The result is recorded in `scripts/output/<id>.json` under
+`tiktok`, so History and the match page both show the match as published.
+
+There's no public watch link, even after a successful publish: the Content
+Posting API doesn't return one, and for a self-only post there isn't a public
+URL to return. Open the TikTok app to see the video.
+
+## Publishing to YouTube (optional)
+
+Once a match has a rendered video, its page in Ballsy Studio shows a
+**YouTube** block that uploads the `.mp4` straight to your channel. Optional
+like the TikTok block — skip this section and everything else still works, you
+just download the file and upload it yourself.
+
+Every upload is disclosed to YouTube as **altered or synthetic media**
+(`status.containsSyntheticMedia: true`) on every publish. That's a standing
+policy of this project, not a toggle — the script is written by an LLM and the
+voice is synthetic.
+
+### Google Cloud Console setup
+
+The API is free, but it needs your own OAuth client. Roughly five minutes:
+
+1. Open the [Google Cloud Console](https://console.cloud.google.com/) and
+   **create a project** (any name — it's only a container for the credentials).
+2. **APIs & Services → Library →** search for **"YouTube Data API v3"** and
+   click **Enable**.
+3. **APIs & Services → OAuth consent screen:**
+   - User type: **External**.
+   - Fill in the app name, your email as support contact, and your email as
+     developer contact. Nothing else is required.
+   - Leave the app in **Testing** mode and add **your own Google account as a
+     test user**. This is the important part: a Testing-mode app can be used by
+     its test users straight away, so you never go through Google's app
+     verification/review process for a personal tool like this.
+4. **APIs & Services → Credentials → Create credentials → OAuth client ID:**
+   - Application type: **Web application**.
+   - Under **Authorized redirect URIs**, add this exact URI — character for
+     character, including the port and the trailing path:
+
+     ```
+     http://localhost:4321/api/publish/youtube/callback
+     ```
+
+     (It must match what the server sends, or Google rejects the sign-in with
+     `redirect_uri_mismatch`.)
+5. Copy the generated **Client ID** and **Client secret** into your `.env`:
+
+   ```bash
+   YOUTUBE_CLIENT_ID=your_client_id.apps.googleusercontent.com
+   YOUTUBE_CLIENT_SECRET=your_client_secret
+   ```
+
+6. Restart `npm run selector`, open a match that already has a rendered video,
+   and click **Connect YouTube**. You'll approve access on Google's screen
+   (it warns the app isn't verified — expected for a Testing-mode app you own)
+   and land back on the match page.
+
+Ballsy only ever asks for the `youtube.upload` scope, so it can add a video to
+the channel and nothing else — it cannot read, edit, or delete anything already
+there. The refresh token is stored in
+`scripts/server/.credentials/youtube.json`, which is gitignored: it's a real
+credential for your account, so don't commit it or paste it anywhere. Deleting
+that file disconnects the account.
+
+> **Quota note:** a YouTube Data API project gets 10,000 units/day by default
+> and each upload costs ~1,600, so roughly **six uploads a day**. Plenty for
+> this, but that's the ceiling before you'd have to request more.
+
+### Publishing
+
+Pick a **visibility** — **Unlisted** is the default on purpose (anyone with the
+link can watch, nothing is posted to your channel feed) and you can switch it
+to Public or Private in the dropdown, or change it later on YouTube itself.
+Then click **Publish to YouTube** and confirm. Title, description and hashtags
+come from the `publishMetadata` generated alongside the script; the page
+streams upload progress and then shows the watch link.
+
+The result is recorded in `scripts/output/<id>.json` under `youtube`, so
+History and the match page both show the match as published — and the block
+turns into that link instead of offering to upload a second copy.

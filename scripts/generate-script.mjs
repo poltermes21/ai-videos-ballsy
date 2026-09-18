@@ -2,7 +2,7 @@
 //
 // Usage: node --env-file=.env scripts/generate-script.mjs <matchId>
 
-import {mkdir, writeFile} from 'node:fs/promises';
+import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
@@ -99,6 +99,21 @@ const Script = z.object({
   outro: TextBlock,
 });
 
+// Written for a caption/title context, not narration — a viewer scrolling
+// past sees this before they ever hear Ballsy speak. Kept as its own object
+// (not nested in Script) because it's platform metadata, not spoken content.
+const PublishMetadata = z.object({
+  title: z.string().describe('Short, punchy video title (~60-70 chars), not read aloud.'),
+  description: z.string().describe('1-3 sentences referencing both teams, the score, and the competition.'),
+  hashtags: z
+    .array(z.string())
+    .min(3)
+    .max(8)
+    .describe('Relevant hashtags (team names, competition, "football"/"soccer") — no spam tags.'),
+});
+
+const GeneratedOutput = z.object({script: Script, publishMetadata: PublishMetadata});
+
 const SYSTEM_PROMPT = `You write the script for Ballsy, a cartoon football mascot recapping a match in a short vertical video for ONE person watching. Ballsy is not narrating to a stadium — he's talking straight to YOU, the viewer on the other side of the screen, like your buddy who just watched the game and is bursting to fill you in. Talk in second person: "you're not gonna believe this", "okay so check this out", "remember I said Morocco were dangerous?". Warm, hyped, a little cocky, and he REACTS out loud like a real person — "ohhh", "nah nah nah", "I actually laughed". Contractions, cut-off asides, the odd catchphrase. He's a MASCOT with a personality, not a commentator with a headset.
 
 If a line reads like any of these, it's wrong — rewrite it looser and more personal:
@@ -131,11 +146,30 @@ Never narrate a var event from the label alone. ALWAYS cross-check nearby events
 
 You'll get real article excerpts (scraped from match reports) alongside the structured events. Use them to describe HOW each key moment actually happened — the buildup, the type of finish, the reaction — instead of just stating that it happened. The structured events give you the what/when/who; the article text is where the actual story is.
 
+NUMBERS THAT DON'T INCLUDE TONIGHT — "form" (below) and "playerStreaks" (see below) both describe the record COMING INTO this match — they do NOT include what just happened in the match you're narrating. If this match itself extends that run (the team wins again, the player scores again), the TRUE current number is one higher than the field says — but do not do that arithmetic and state a new total, that's exactly the kind of "nudged" number the grounding rule forbids. Instead, frame it as "coming into tonight" / "before this one" and let tonight's own event speak for itself as a separate fact — e.g. "they'd won five straight coming into this one — and just made it look like a sixth was never in doubt" (no invented number), NOT "that's five wins from five now" (wrong: five was the count BEFORE tonight's win, so "now" is false) and NOT "that's six wins from six now" (an invented number never present in the data).
+
 GROUNDED CONTEXT — alongside the events you may get a "context" block with:
 - form: each team's league position, points, last 5 results (e.g. "WLLWL"), and average rating — i.e. how they came INTO the match.
 - h2h: the head-to-head record between these two (home wins / draws / away wins).
 - stats: match totals — possession, shots, shots on target, xg (expected goals), corners, goalkeeper saves.
+- playerStreaks: optional, see PLAYER STREAKS below.
 Use "form" and "h2h" freely — a real fan naturally brings up league position or "these two never play a boring one" as background. But "stats" (shots, shots on target, xg, corners, saves, possession) is different: a regular person watching a match does NOT casually cite exact shot counts or xG numbers — that reads as a stats bot, not a mate recapping the game. Only reach for a stat when it's genuinely notable: a HUGE gap between the teams (e.g. 21 shots to 4), a scoreline that the numbers make look wrong (a team battered on shots/xg but still lost or drew), or something statistically freakish. If the stats are unremarkable or close, skip them entirely rather than forcing one in as filler. The GROUNDING RULE still applies: only cite numbers actually present in the context block.
+
+PLAYER STREAKS — the context block may also carry "playerStreaks": the run of goals/assists a player carried INTO this match. Each entry is one player, already filtered to the SAME competition, SAME season and SAME club as this match, so it really is his form in this league — never his cup run, his Champions League nights or his international caps mixed in. Fields:
+- appearances: how many of his most recent matches (that competition, that club, all before this one) were looked at.
+- withGoalOrAssist / withGoal: how many of those he scored or assisted in / scored in.
+- goals, assists: his totals across exactly those appearances.
+- consecutiveWithGoalOrAssist / consecutiveWithGoal: the unbroken run leading straight into THIS match — 4 means he scored or assisted in each of the last 4, no blanks. This does NOT count tonight — see NUMBERS THAT DON'T INCLUDE TONIGHT above.
+- recent: those same appearances newest-first — date, opponent, and his goals/assists in each.
+- missedMatchesInWindow: true if he was injured or missing for part of that stretch.
+Only players already on a run worth telling appear here — anyone unremarkable is left out before you ever see him, so you never have to judge whether a number is big enough. It's still optional flavour, not a box to tick:
+- Only bring a streak up right next to the goal or assist that player actually produces HERE, as the payoff — "and that's him every single week now". If you're not narrating his moment, don't mention his form at all.
+- At most ONE player's streak in the whole script, even when two are listed. Pick whoever matters most to the story you're telling.
+- Say it like a fan, not a spreadsheet: "four league games running he's scored now, four!", "the guy literally cannot stop". Never "his goal involvement rate across his last five appearances is eighty percent".
+- If missedMatchesInWindow is true he's been in and out of the side — talk about what he's done in the games he HAS played, don't frame him as unstoppable every week.
+- The GROUNDING RULE applies in full here. Every number you say comes straight off these fields, nothing rounded up or nudged: a consecutiveWithGoal of 0 means his last one was an assist, not a goal, so it is NOT "scored in five straight". Never turn a run in this league into a run "in all competitions", never add a season tally, a career total or a record — none of that is in this data.
+
+PLATFORM METADATA — alongside the script, write a separate "publishMetadata" for the video's title/description/hashtags on YouTube/TikTok. This is NOT spoken by Ballsy and is NOT narration — it's what a scrolling viewer reads before pressing play. Short and punchy (title), 1-3 sentences naming both teams/score/competition (description), 3-8 relevant hashtags with no spam. Same grounding rule applies: only real teams/score/competition, nothing invented.
 
 DURATION REQUIREMENT — this is a short-form video and it must run 30-90 seconds read aloud, which at a casual conversational pace is roughly 140-220 words total across every block. If a draft feels short, do NOT pad it with filler — add real texture to the key moments using the article excerpts (how the goal happened, who set it up, the stakes in that moment). A recap that's just a list of bare facts will always come in short; a recap with a story for each moment won't.
 
@@ -263,17 +297,30 @@ const client = new Anthropic({apiKey: ANTHROPIC_API_KEY});
 const response = await client.messages.parse({
   model: 'claude-sonnet-5',
   // Adaptive thinking shares this budget with the output; 2048 truncated the
-  // JSON mid-string on harder cases.
-  max_tokens: 8192,
+  // JSON mid-string on harder cases, and adding publishMetadata to the
+  // required output made 8192 too tight on a dense match (long key_moments +
+  // playerStreaks reasoning + the new title/description/hashtags all
+  // competing for the same budget).
+  max_tokens: 16000,
   system: SYSTEM_PROMPT,
-  output_config: {format: zodOutputFormat(Script)},
+  output_config: {format: zodOutputFormat(GeneratedOutput)},
   messages: [{role: 'user', content: JSON.stringify(matchData, null, 2)}],
 });
 
-const script = response.parsed_output;
-if (!script) {
+const generated = response.parsed_output;
+if (!generated) {
+  // Dump what actually came back instead of guessing — a text block that
+  // failed schema validation throws its own AnthropicError with the real
+  // reason; landing here instead means there was no text block at all
+  // (thinking consumed the whole budget), which is what stop_reason/content
+  // below will show.
+  console.error('stop_reason:', response.stop_reason);
+  console.error('content block types:', response.content.map((b) => b.type));
+  const textBlock = response.content.find((b) => b.type === 'text');
+  if (textBlock) console.error('raw text (first 2000 chars):', textBlock.text.slice(0, 2000));
   throw new Error('Model output did not parse against the schema.');
 }
+const {script, publishMetadata} = generated;
 
 if (script.key_moments.length < 2 || script.key_moments.length > 4) {
   throw new Error(
@@ -319,10 +366,29 @@ const matchInfo = {
   season: match.season,
   date: match.date,
 };
+// Regenerating a script must NOT wipe an existing publish record — a video
+// already live on YouTube/TikTok was rendered from whatever script existed
+// at the time, and that history stays valid regardless of later rewrites.
+let previousPublishState = {youtube: null, tiktok: null};
+try {
+  const existing = JSON.parse(await readFile(outputPath, 'utf8'));
+  previousPublishState = {youtube: existing.youtube ?? null, tiktok: existing.tiktok ?? null};
+} catch {
+  // No existing file (first generation for this match) — defaults above stand.
+}
+
 await writeFile(
   outputPath,
   JSON.stringify(
-    {matchId, matchInfo, reviewStatus: 'pending', reviewedAt: null, script},
+    {
+      matchId,
+      matchInfo,
+      reviewStatus: 'pending',
+      reviewedAt: null,
+      script,
+      publishMetadata,
+      ...previousPublishState,
+    },
     null,
     2,
   ),

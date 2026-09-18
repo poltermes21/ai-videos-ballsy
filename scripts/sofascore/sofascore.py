@@ -132,6 +132,26 @@ def build_number_map(lineups):
     return numbers
 
 
+def build_team_map(lineups, home_id, away_id):
+    """Map player id -> the team id he played for IN THIS MATCH.
+
+    The incident feed's `isHome` marks which side an incident *benefits*, which
+    is the wrong team for an own goal — the lineups give the real allegiance.
+    Note it's the *side* a player is listed under that says who he played for:
+    each entry's own `teamId` is his club TODAY, so on an older fixture it
+    reads back as whoever he has since transferred to.
+    """
+    teams = {}
+    if not isinstance(lineups, dict):
+        return teams
+    for side, team_id in (("home", home_id), ("away", away_id)):
+        for entry in (lineups.get(side) or {}).get("players") or []:
+            pl = entry.get("player") or {}
+            if pl.get("id") is not None:
+                teams[pl["id"]] = team_id
+    return teams
+
+
 # ---------------------------------------------------------------------------
 # Pre-match + match "context" for the script (grounded facts the LLM can cite)
 # ---------------------------------------------------------------------------
@@ -196,6 +216,209 @@ def build_h2h(h2h_json):
         "draws": td.get("draws"),
         "awayWins": td.get("awayWins"),
     }
+
+
+# ---------------------------------------------------------------------------
+# Player streaks: was a scorer/assister here already on a run coming in?
+# ---------------------------------------------------------------------------
+#
+# /player/{id}/events/last/0 returns a player's recent matches across EVERY
+# competition he appears in — league, cup, Champions League and full
+# international duty all in one list. A raw "last N matches" run off that list
+# is meaningless (it would blend a World Cup goal into a LaLiga streak), so
+# every appearance is filtered down to the same competition, same season and
+# same club as the match being narrated before anything is counted.
+#
+# The same payload carries three side maps keyed by event id, which is why one
+# request per player is enough: `statisticsMap` (rating/minutesPlayed — absent
+# for an unused sub or a match he wasn't in), `playedForTeamMap` (which club
+# he turned out for, so a transfer can't carry a streak over) and
+# `incidentsMap` ({goals, assists, penaltyGoals, ownGoals, yellowCards}).
+
+STREAK_WINDOW = 6             # appearances looked back over
+STREAK_MIN_APPEARANCES = 3    # below this there isn't enough history to judge
+STREAK_MIN_RUN = 3            # consecutive involvements that count as a run
+# ...or, without needing to be consecutive, this many involvements inside the
+# window — catches a player who's clearly hot but has a blank game mixed in
+# (goal, blank, goal, blank, goal is nobody's "streak" by the strict count,
+# but it's still 3 goal involvements out of his last 6 and worth mentioning).
+STREAK_MIN_INVOLVED = 3
+# Anything older than this is stale form, not a current run. Belt-and-braces
+# with the same-season filter: it also kills a streak stitched across a
+# mid-season injury lay-off or a long international break.
+STREAK_MAX_AGE_DAYS = 90
+# events/last/{page} returns 30 matches, newest page first. A recent fixture
+# needs only page 0, but this pipeline is regularly run against older test
+# fixtures whose window sits entirely behind page 0 — so page back until the
+# window is covered, with a hard cap.
+STREAK_MAX_PAGES = 4
+
+
+def _ymd(ts):
+    return time.strftime("%Y-%m-%d", time.gmtime(ts)) if ts else None
+
+
+def match_contributors(raw_incidents, team_map, home_id, away_id):
+    """Players with a real goal or assist in THIS match: [{id, name, teamId}].
+
+    Own goals are skipped — nobody is "on a run" of scoring past his own
+    keeper, and the scorer plays for the side the goal is credited against.
+    """
+    found = {}
+
+    def add(player, fallback_team):
+        pid = (player or {}).get("id")
+        if pid is not None and pid not in found:
+            found[pid] = {
+                "id": pid,
+                "name": player.get("name"),
+                "teamId": team_map.get(pid, fallback_team),
+            }
+
+    for it in raw_incidents or []:
+        if it.get("incidentType") != "goal" or it.get("incidentClass") == "ownGoal":
+            continue
+        scored_for = home_id if it.get("isHome") else away_id
+        add(it.get("player"), scored_for)
+        add(it.get("assist1"), scored_for)
+    return list(found.values())
+
+
+def _player_appearances(player_id, team_id, tournament_id, season_id, before_ts):
+    """This player's last few appearances before `before_ts`, newest first.
+
+    Restricted to the same competition, season and club — see the note above.
+    """
+    cutoff = before_ts - STREAK_MAX_AGE_DAYS * 86400
+    rows = []
+    for page in range(STREAK_MAX_PAGES):
+        data = api_get(f"/player/{player_id}/events/last/{page}")
+        if not isinstance(data, dict):
+            break
+        stats = data.get("statisticsMap") or {}
+        played_for = data.get("playedForTeamMap") or {}
+        incidents = data.get("incidentsMap") or {}
+        page_events = data.get("events") or []
+
+        for e in page_events:
+            ts, key = e.get("startTimestamp"), str(e.get("id"))
+            if not ts or ts >= before_ts or ts < cutoff:
+                continue  # the match itself, anything after it, or stale form
+            ut = (e.get("tournament") or {}).get("uniqueTournament") or {}
+            if ut.get("id") != tournament_id:
+                continue
+            if (e.get("season") or {}).get("id") != season_id:
+                continue
+            if played_for.get(key) != team_id:
+                continue
+            if not (stats.get(key) or {}).get("minutesPlayed"):
+                continue  # named in the squad but didn't actually feature
+            inc = incidents.get(key) or {}
+            home, away = e.get("homeTeam") or {}, e.get("awayTeam") or {}
+            opponent = away if home.get("id") == team_id else home
+            rows.append({
+                "date": _ymd(ts),
+                "timestamp": ts,
+                "opponent": _pname(opponent),
+                # `goals` excludes own goals (SofaScore keys those separately).
+                "goals": _to_int(inc.get("goals")) or 0,
+                "assists": _to_int(inc.get("assists")) or 0,
+            })
+
+        # Pages run newest-first, so once one reaches past the cutoff every
+        # later page does too — the window is fully covered, stop requesting.
+        oldest = min((e.get("startTimestamp") or 0) for e in page_events) if page_events else 0
+        if oldest < cutoff or not data.get("hasNextPage"):
+            break
+
+    rows.sort(key=lambda r: r["timestamp"], reverse=True)
+    return rows[:STREAK_WINDOW]
+
+
+def _absence_in_window(player_id, start_ts, end_ts):
+    """True if the player was injured or missed a match inside the window.
+
+    A calendar gap between two appearances is usually just the fixture list (an
+    international break, a midweek round he was rested for), so it's a bad
+    injury signal. /player/{id}/last-year-summary is the real one: it
+    interleaves explicit "injury" and "missing" entries with the rated "event"
+    entries. Only called for players who already cleared the notability bar.
+    """
+    data = api_get(f"/player/{player_id}/last-year-summary")
+    for it in (data or {}).get("summary") or []:
+        if it.get("type") not in ("injury", "missing"):
+            continue
+        ts = it.get("timestamp")
+        if ts and start_ts < ts < end_ts:
+            return True
+    return False
+
+
+def build_player_streaks(raw_incidents, lineups, event):
+    """Notable pre-match goal/assist runs for this match's scorers/assisters.
+
+    Returns a list (one entry per player) or None. Only players who actually
+    contributed a goal or assist HERE are looked up — a run only earns a
+    mention when it's the backstory to something being narrated — and only
+    runs clearing STREAK_MIN_RUN / STREAK_MIN_INVOLVED are returned, so an
+    unremarkable player simply doesn't appear.
+    """
+    before_ts = event.get("startTimestamp")
+    tournament_id = (((event.get("tournament") or {}).get("uniqueTournament")) or {}).get("id")
+    season_id = (event.get("season") or {}).get("id")
+    home, away = event.get("homeTeam") or {}, event.get("awayTeam") or {}
+    if not (before_ts and tournament_id and season_id):
+        return None
+
+    team_map = build_team_map(lineups, home.get("id"), away.get("id"))
+    names = {home.get("id"): _pname(home), away.get("id"): _pname(away)}
+    competition = (((event.get("tournament") or {}).get("uniqueTournament")) or {}).get("name")
+
+    out = []
+    for player in match_contributors(raw_incidents, team_map, home.get("id"), away.get("id")):
+        apps = _player_appearances(
+            player["id"], player["teamId"], tournament_id, season_id, before_ts
+        )
+        if len(apps) < STREAK_MIN_APPEARANCES:
+            continue
+
+        involved = [a for a in apps if a["goals"] or a["assists"]]
+        run = 0
+        for a in apps:  # newest first, so this is the run leading INTO this match
+            if not (a["goals"] or a["assists"]):
+                break
+            run += 1
+        scoring_run = 0
+        for a in apps:
+            if not a["goals"]:
+                break
+            scoring_run += 1
+
+        if run < STREAK_MIN_RUN and len(involved) < STREAK_MIN_INVOLVED:
+            continue  # not genuinely notable — don't hand the model filler
+
+        out.append({
+            "player": player["name"],
+            "team": names.get(player["teamId"]),
+            "competition": competition,
+            "appearances": len(apps),
+            "withGoalOrAssist": len(involved),
+            "withGoal": sum(1 for a in apps if a["goals"]),
+            "goals": sum(a["goals"] for a in apps),
+            "assists": sum(a["assists"] for a in apps),
+            "consecutiveWithGoalOrAssist": run,
+            "consecutiveWithGoal": scoring_run,
+            "recent": [
+                {k: a[k] for k in ("date", "opponent", "goals", "assists")} for a in apps
+            ],
+            "missedMatchesInWindow": _absence_in_window(
+                player["id"], apps[-1]["timestamp"], before_ts
+            ),
+        })
+
+    # Strongest run first, so the model reads the most tellable one first.
+    out.sort(key=lambda s: (s["consecutiveWithGoalOrAssist"], s["goals"]), reverse=True)
+    return out or None
 
 
 # Missed-penalty reason -> Ballsy penalty outcome. This is the mapping we
@@ -287,22 +510,28 @@ def cmd_fetch(match_id):
 
     inc = api_get(f"/event/{match_id}/incidents") or {}
     raw = inc.get("incidents", []) if isinstance(inc, dict) else (inc or [])
-    # Lineups fill shirt numbers the incident feed sometimes omits (late subs).
-    numbers = build_number_map(api_get(f"/event/{match_id}/lineups"))
+    # Lineups fill shirt numbers the incident feed sometimes omits (late subs),
+    # and say which team each player actually turned out for.
+    lineups = api_get(f"/event/{match_id}/lineups")
+    numbers = build_number_map(lineups)
     # Incidents come newest-first; emit chronological.
     events = [n for n in (normalize_incident(it, numbers) for it in reversed(raw)) if n]
 
-    # Grounded context for the script: pre-match form, h2h, match stats.
+    # Grounded context for the script: pre-match form, h2h, match stats,
+    # and any pre-match scoring run behind this match's goals/assists.
     context = {}
     form = build_form(api_get(f"/event/{match_id}/pregame-form"))
     h2h = build_h2h(api_get(f"/event/{match_id}/h2h"))
     stats = build_stats(api_get(f"/event/{match_id}/statistics"))
+    streaks = build_player_streaks(raw, lineups, e)
     if form:
         context["form"] = form
     if h2h:
         context["h2h"] = h2h
     if stats:
         context["stats"] = stats
+    if streaks:
+        context["playerStreaks"] = streaks
 
     status = e.get("status") or {}
     tournament = ((e.get("tournament") or {}).get("uniqueTournament") or {})

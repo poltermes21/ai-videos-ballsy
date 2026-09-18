@@ -25,6 +25,8 @@ import {
   getSeasons,
   getSeasonMatches,
 } from '../lib/match-source.mjs';
+import youtubeRouter from './publish-youtube.mjs';
+import tiktokRouter from './publish-tiktok.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -215,6 +217,8 @@ app.get('/api/library', async (req, res) => {
           reviewStatus: saved.reviewStatus,
           reviewedAt: saved.reviewedAt,
           ...pipelineArtifacts(matchId),
+          youtube: saved.youtube ?? null,
+          tiktok: saved.tiktok ?? null,
           updatedAt: mtime.toISOString(),
         };
       }),
@@ -246,9 +250,12 @@ app.get('/api/script/:matchId', async (req, res) => {
     }
     res.json({
       script: saved.script,
+      publishMetadata: saved.publishMetadata ?? null,
       reviewStatus: saved.reviewStatus,
       matchInfo: saved.matchInfo ?? backfillMatchInfo(matchId),
       ...pipelineArtifacts(matchId),
+      youtube: saved.youtube ?? null,
+      tiktok: saved.tiktok ?? null,
     });
   } catch (err) {
     res.status(404).json({error: err.message});
@@ -498,6 +505,13 @@ app.post('/api/studio/launch', async (req, res) => {
     res.status(500).json({error: err.message});
   }
 });
+
+// YouTube/TikTok publishing — each router is fully self-contained (OAuth,
+// status, and the SSE publish endpoint), owning its own new file. Mounting
+// them is the only touch point this file needs; route changes for either
+// platform belong in their own module, not here.
+app.use('/api/publish/youtube', youtubeRouter);
+app.use('/api/publish/tiktok', tiktokRouter);
 
 // SPA fallback: any GET that isn't an API call or a static asset gets
 // index.html, so the client-side router can read location.pathname itself.
