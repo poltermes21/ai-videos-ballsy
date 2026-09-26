@@ -17,10 +17,25 @@ narrator** — it decides what's worth telling (skips a routine 20th-minute
 yellow card, mentions one after a brawl) rather than listing every event.
 Preserve that framing if touching `scripts/generate-script.mjs`'s prompt.
 
+Ballsy has real team loyalties (Manchester United + FC Barcelona; hates Real
+Madrid, Man City, PSG) — a deliberate personality choice, not neutral by
+default. `scripts/sofascore/sofascore.py`'s `build_personal_angle`/
+`build_personal_watch` detect whether tonight's match touches one of those
+five teams directly, or — for a fully neutral match — whether the result
+still moved the real table gap between Man United/Barcelona and one of
+tonight's two teams (grounded in real standings, not invented). See
+`FAVORITE_TEAMS`/`RIVAL_TEAM_NAMES` there and the `IDENTITY` section of
+`generate-script.mjs`'s prompt.
+
 ## Legal constraints (drove several design decisions — don't undo them)
 
-- No real player faces, likenesses, or broadcast footage. Every graphic is
-  generic: the ball, a scoreboard, a card, a substitution arrow.
+- No broadcast footage, and no invented/fabricated depictions of a real
+  person. Real team badges/colours and a real SofaScore player photo (in
+  `PlayerCard`, see `src/graphics/PlayerCard.tsx`) ARE used — a deliberate,
+  informed reversal of this project's earlier "no real player faces"
+  stance, made explicitly aware of the legal exposure, not by oversight.
+  Treated to match the show's flat-cartoon system (thick outline, drop
+  shadow) rather than dropped in as a raw photo.
 - The mascot stays stylised/cartoonish on purpose, not a realistic avatar.
 - Controversy commentary is always framed as opinion, never a factual claim
   about a real person.
@@ -45,30 +60,171 @@ graphic, when, with which score/players). Nothing is transcribed or guessed
 after the fact — if you add a new per-event graphic or script field, wire it
 through this same chain rather than inventing a parallel data path.
 
+### Player videos — a second video type, same pipeline
+
+Alongside match recaps, Ballsy can also do a short "form check" on one real
+player (is he hot or cold right now), grounded in SofaScore's per-player
+stats rather than a match's events. It's not a parallel pipeline — it's the
+same five-block script shape (`hook`/`key_moments`/`controversy`/`result`/
+`outro`) and the same downstream chain (audio → visemes → expressions →
+avatar timeline → captions → render), reusing `script-timing.mjs` and
+`generate-avatar-timeline.mjs` completely unchanged, since both only depend
+on that block shape, never on match specifics. What differs: the data
+source (`getPlayerForm()` instead of `getMatch()`), the script generator
+(`scripts/generate-player-script.mjs`, tagging `stats` instead of `events`
+per moment), the timeline generator (`scripts/generate-player-timeline.mjs`,
+skipping the SofaScore-event cross-reference step since a stat's numbers are
+already grounded), the graphics (`src/graphics/RecentFormGraphic.tsx`,
+`SeasonTallyGraphic.tsx`, `StreakCallOutGraphic.tsx`, `InjuryGapGraphic.tsx`,
+`UpcomingFixtureGraphic.tsx`), and the Remotion composition
+(`src/ballsyPlayer.tsx`, the `PlayerBallsy` composition). Ballsy's cam itself
+(`src/BallsyCam.tsx`) is shared verbatim between both video types — see
+"Key files" below.
+
+A player's form changes week to week, so unlike a match (one fixed id, one
+video) a player can have many videos over time — fixture ids are
+`player-<playerId>-<YYYY-MM-DD>`, one dated RUN per generation, never
+overwriting an earlier day's script/audio/video for the same player (see
+the Gotchas entry on `out/` layout below).
+
+Backend routes live in `scripts/server/player.mjs` (mounted at
+`/api/player/*`, mirroring the match routes in `index.mjs` one for one —
+own id validator, own SSE helper, own fixture-id pointer, per the pattern
+`publish-youtube.mjs`/`publish-tiktok.mjs` already established), plus
+`GET /runs/:playerId` (every dated run for a player, newest first) with no
+match equivalent. Frontend, in `scripts/server/src/app.ts`: `renderPlayerHome()`
+(search by name) → `renderPlayerOverview()` (one player: current form, past
+runs, "generate today's video") → `renderPlayerDetail()` (one dated run's
+review/approve/pipeline/render workspace) — reached via the "New player" nav
+link. YouTube/TikTok publishing works for player videos like matches (see
+"Videos (runs)" below).
+
+### Pre-match previews — a third video type
+
+Ballsy can also preview an upcoming fixture before it's played — how the two
+teams arrive (form, table position, head-to-head, team news, a streak each),
+capped off with Ballsy's own opinion-framed prediction of who wins. Same
+precedent again: the same five-block script shape (`hook`/`key_moments`/
+`controversy`/`result`/`outro`, with `result` repurposed as the prediction
+block) and the same downstream chain (audio → visemes → expressions → avatar
+timeline → captions → render), reusing `script-timing.mjs` and
+`generate-avatar-timeline.mjs` unchanged. What differs: the data source
+(`getPrematch()` in `scripts/lib/match-source.mjs`, backed by
+`cmd_prematch`/`build_prematch_context` in `sofascore.py` — form/h2h/streaks/
+standings/personalAngle, deliberately **no events, no stats**, since neither
+exists before kickoff), the script generator
+(`scripts/generate-prematch-script.mjs`, tagging `key_moments` with
+`team_form`/`h2h_record`/`table_position`/`team_streak`/`injury_news`), the
+timeline generator (`scripts/generate-prematch-timeline.mjs`, no SofaScore
+cross-reference step for the same reason as the player generator — a
+pre-match stat's numbers are already grounded), the graphics
+(`src/graphics/TeamFormCompareGraphic.tsx`, `TablePositionGraphic.tsx`,
+`H2HGraphic.tsx`, `TeamStreakGraphic.tsx`, `TeamNewsGraphic.tsx`,
+`PredictionGraphic.tsx`), and the Remotion composition
+(`src/ballsyPrematch.tsx`, the `PrematchBallsy` composition, reusing
+`CoverCard`/`Background`/`BallsyCam` verbatim). The prediction itself is
+always framed as opinion ("BALLSY SAYS...", "just my opinion") — never a
+factual claim about a future result, same non-negotiable framing rule as
+controversy commentary.
+
+Because the user types the two team names directly rather than browsing a
+fixture list, this needed its own resolver instead of `cmd_matches`'
+round-by-round browsing: `search-team <query>` (mirrors `cmd_search_player`)
+finds a team, then `next-fixture <teamAId> <teamBId>` pages
+`/team/{id}/events/next/{page}` looking for the first upcoming event between
+them. A preview and a recap of the *same* real-world fixture are deliberately
+different id spaces — `prematch-<matchId>` vs. the bare match id — so a
+recap generated after the match is played can never collide with its own
+earlier preview in `scripts/output/`, `public/audio/`, or `out/` (see
+`scripts/lib/run-paths.mjs`'s third prefix).
+
+Backend routes live in `scripts/server/prematch.mjs` (mounted at
+`/api/prematch/*`, mirroring `player.mjs`'s shape one for one — own
+validator, own SSE helper, own `listAllPrematchRuns()` merged into
+`/api/library` alongside matches/players). Frontend, in
+`scripts/server/src/app.ts`: `renderPrematchHome()` (two independent
+debounced team-search boxes, Team A/Team B, navigating straight to the
+resolved fixture on a match — no fixture-list UI at all) →
+`renderPrematchOverview()` (free preview report, focus-prompt field,
+"Generate a preview" button, past runs) → `renderPrematchDetail()` (one
+run's review/approve/pipeline/render/publish workspace) — reached via the
+"New preview" nav link. YouTube/TikTok publishing works here too (see
+"Videos (runs)" below).
+
+### Videos (runs) — many videos per match / player / preview
+
+A **video = a run**: one saved script + its audio/timeline files + one mp4. A
+match, player or preview can have any number of them (different focus, or the
+same focus kept as a new *version*), each with its own review/pipeline/publish
+state. `scripts/server/run-ref.mjs` is the one resolver for a run of any kind
+(`{kind:'match'|'prematch', matchId, runSlug}` / `{kind:'player', playerId,
+date, runSlug}` → fixture id, script path, mp4 path/url, audio-dir files,
+OAuth return page); publish, rename, delete and the run listings all go
+through it — don't recompute paths per kind anywhere else.
+
+- **Never silently overwrite a paid script.** `POST .../generate-script`
+  checks `planGeneration()` first: a slug that already exists returns **409**
+  `{exists:true,…}` *before spawning anything*; the client then offers "Keep
+  both — create a new version" (`mode:'new-version'` → next free slug,
+  `default`→`v2`,`v3`…, `<focus>`→`<focus>-v2`…) or "Replace"
+  (`mode:'overwrite'`). "Regenerate script" on a detail page passes its own
+  `runSlug` (+`date` for players) with `mode:'overwrite'`. The chosen slug reaches
+  the generators via `BALLSY_RUN_SLUG` (they fall back to `runSlugFor(focus)`
+  from a terminal). Versions are just more slugs, so no layout changes.
+- Saved script JSON also carries `createdAt` and an optional user `label`
+  (`POST /api/run/label`); regenerating keeps both plus the `youtube`/`tiktok`
+  publish records.
+- **Delete** (`POST /api/run/delete`, `dryRun:true` lists the files first):
+  removes only that run's script+alignment, the exact `public/audio/<id>` sidecar
+  names and its mp4 (a sibling whose id shares a prefix is never matched);
+  refused with 409 while that run's pipeline/render is running (`markBusy`).
+  It never touches an already-uploaded YouTube/TikTok video.
+- **Publishing** (`publish-youtube.mjs`/`publish-tiktok.mjs`) takes the run as
+  query params (`kind=&matchId=|playerId=&date=&runSlug=`; `kind` defaults to
+  `match`) and the frontend publish blocks take that as a `runQuery` string.
+- **Frontend**: History (`renderHistory`) has kind tabs (All/Matches/Players/
+  Previews), status + sort filters, and groups videos under their
+  match/player/preview; state lives in the URL (`?kind=&q=&status=&sort=`).
+  Overviews list an entity's videos with `renderRunsList` and create new ones
+  with the shared `renderNewVideoForm`; detail pages show a sibling strip,
+  rename box, publish blocks and a two-step Delete panel (no browser dialogs).
+
 ## Key files
 
-- `src/ballsy.tsx` — the mascot: drives the Rive state machine per-frame
-  (`viseme` 0-8, `expression` 0-4), never lets Rive run its own clock.
-  Renderer is created once and reused (don't call `makeRenderer()` per
-  frame — it leaks). Avatar div renders *after* the graphics `<Sequence>`s
-  so Ballsy sits in front of them.
+- `src/BallsyCam.tsx` — the mascot's cam itself: drives the Rive state
+  machine per-frame (`viseme` 0-8, `expression` 0-4), never lets Rive run
+  its own clock, plus the fullscreen-vs-split cam-height mechanic and
+  captions. Renderer is created once and reused (don't call
+  `makeRenderer()` per frame — it leaks). Fully content-agnostic — shared
+  verbatim by `src/ballsy.tsx` (match pitch below) and
+  `src/ballsyPlayer.tsx` (player stat-cards below) via a `children` render
+  prop that receives the cam's live geometry; never fork this file, extend
+  the render-prop contract instead.
 - `src/graphics/*.tsx` — one component per event type (goal, card, penalty,
   substitution, clear chance, VAR review, goal disallowed). Shared tokens
   (`COLORS`, `Banner`, `Scoreboard`, `TitlePill`) live in `graphics/shared.tsx`.
 - `scripts/sofascore/sofascore.py` — the only thing that talks to SofaScore
   (Cloudflare-bypassed via `curl_cffi` Chrome impersonation). Node calls it
-  through `scripts/lib/match-source.mjs`, never directly.
+  through `scripts/lib/match-source.mjs`, never directly. Its `fetch-image`
+  command downloads a team/player/tournament badge straight to disk (real
+  bytes, not JSON) — `match-source.mjs`'s `ensureTeamBadge`/`ensurePlayerPhoto`/
+  `ensureTournamentLogo` wrap it with an on-disk cache under `public/`.
 - `scripts/generate-graphics-timeline.mjs` — matches script-tagged events to
   real SofaScore events for props (score, card colour, etc.), times each
   graphic to when its line is actually spoken (not the start of the
   sentence), and splits overlapping event windows (e.g. VAR review + the
-  card it produces) sequentially instead of stacking them.
+  card it produces) sequentially instead of stacking them. Also ensures every
+  badge/logo a render needs already exists in `public/` (Remotion can't fetch
+  anything itself at render time) and emits `matchInfo` alongside
+  `graphicsTimeline` for the cover card / persistent mini-scoreboard.
 - `scripts/server/` — **Ballsy Studio**, the local web app (`npm run
-  selector`, port 4321). Express backend (`index.mjs`) + a small
-  no-framework TypeScript frontend (`src/app.ts`, compiled to
+  selector`, port 4321). Express backend (`index.mjs`, plus `player.mjs` for
+  player-video routes and `prematch.mjs` for pre-match-preview routes) + a
+  small no-framework TypeScript frontend (`src/app.ts`, compiled to
   `public/app.js` by its own `tsconfig.json` — the root `tsconfig.json`
   excludes `scripts/` on purpose, don't remove that). Has its own
-  History-API router (`/`, `/history`, `/match/:id`).
+  History-API router (`/`, `/history`, `/match/:id`, `/player`, `/player/:id`,
+  `/player/:id/:date`, `/prematch`, `/prematch/:id`, `/prematch/:id/:runSlug`).
 
 ## Gotchas
 
@@ -84,8 +240,22 @@ through this same chain rather than inventing a parallel data path.
 - ElevenLabs free tier: shared/professional Voice Library voices return 402;
   a custom Voice Design voice works. Paid plans aren't affected.
 - Match ids are SofaScore event ids, used to build file paths
-  (`scripts/output/<id>.json`, `public/audio/<id>*`, `out/<id>.mp4`) —
-  always validate as numeric before interpolating into a path.
+  (`scripts/output/<id>.json`, `public/audio/<id>*`) — always validate as
+  numeric before interpolating into a path. Player-video fixture ids are
+  `player-<playerId>-<YYYY-MM-DD>` — one dated RUN per generation, never
+  overwriting an earlier day's video for the same player (his form changes
+  week to week). Pre-match-preview fixture ids are `prematch-<matchId>` — the
+  same real SofaScore match id as its eventual recap, but a deliberately
+  different id space (see the pre-match-previews section above), never
+  `<matchId>` bare. Rendered videos live under `out/`, one subfolder per kind
+  rather than a flat folder — `out/matches/<tournament>/<season>/<round>/
+  <id>.mp4`, `out/players/<playerId>/<date>.mp4`,
+  `out/prematch/<tournament>/<matchId>/<runSlug>.mp4` — built by
+  `scripts/server/video-paths.mjs` (the one place that decides this layout;
+  `slugify()` there is why tournament/season names never hit the filesystem
+  as raw free text). Every API response that reports a video's presence
+  includes a ready-to-use `videoUrl` — the frontend never recomputes this
+  path itself, it just uses whatever the server gives it.
 
 ## Commands
 
