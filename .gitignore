@@ -31,6 +31,12 @@ skills-lock.json
 # audio has no commercial rights, so it shouldn't be committed.
 public/audio/
 
+# Team badges, player photos, competition logos — fetched from SofaScore on
+# demand and cached here, not authored assets.
+public/badges/
+public/players/
+public/competitions/
+
 # Generated match scripts — regenerable test/review output, not source.
 scripts/output/
 
