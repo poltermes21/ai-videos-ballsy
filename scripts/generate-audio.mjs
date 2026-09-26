@@ -4,9 +4,9 @@ import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {fetchWithRetry} from './lib/http.mjs';
+import {fixtureOutputDir, fixtureOutputPath} from './lib/run-paths.mjs';
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
-const OUTPUT_DIR = join(SCRIPTS_DIR, 'output');
 const PUBLIC_AUDIO_DIR = join(SCRIPTS_DIR, '..', 'public', 'audio');
 
 const apiKey = process.env.ELEVENLABS_API_KEY;
@@ -26,7 +26,7 @@ if (!fixtureId) {
   process.exit(1);
 }
 
-const filePath = join(OUTPUT_DIR, `${fixtureId}.json`);
+const filePath = fixtureOutputPath(fixtureId);
 const saved = JSON.parse(await readFile(filePath, 'utf8'));
 if (saved.reviewStatus !== 'approved') {
   console.error(
@@ -104,7 +104,8 @@ await mkdir(PUBLIC_AUDIO_DIR, {recursive: true});
 const audioPath = join(PUBLIC_AUDIO_DIR, `${fixtureId}.mp3`);
 await writeFile(audioPath, audioBuffer);
 
-const alignmentPath = join(OUTPUT_DIR, `${fixtureId}-alignment.json`);
+await mkdir(fixtureOutputDir(fixtureId), {recursive: true});
+const alignmentPath = fixtureOutputPath(fixtureId, '-alignment');
 await writeFile(
   alignmentPath,
   JSON.stringify(

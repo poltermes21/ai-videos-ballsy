@@ -7,9 +7,9 @@
 import {readFile, writeFile} from 'node:fs/promises';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {fixtureOutputPath} from './lib/run-paths.mjs';
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
-const OUTPUT_DIR = join(SCRIPTS_DIR, 'output');
 const PUBLIC_AUDIO_DIR = join(SCRIPTS_DIR, '..', 'public', 'audio');
 
 const fixtureId = process.argv[2];
@@ -19,7 +19,7 @@ if (!fixtureId) {
 }
 
 const {characters, character_start_times_seconds, character_end_times_seconds} =
-  JSON.parse(await readFile(join(OUTPUT_DIR, `${fixtureId}-alignment.json`), 'utf8'));
+  JSON.parse(await readFile(fixtureOutputPath(fixtureId, '-alignment'), 'utf8'));
 
 // Split into words at whitespace boundaries, tracking each word's start/end
 // character index so its timing can be read straight off the aligned arrays.

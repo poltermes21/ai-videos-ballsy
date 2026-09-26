@@ -1,11 +1,8 @@
 // Usage: node scripts/review-script.mjs <fixtureId>
 
 import {readFile, writeFile} from 'node:fs/promises';
-import {dirname, join} from 'node:path';
 import {createInterface} from 'node:readline/promises';
-import {fileURLToPath} from 'node:url';
-
-const OUTPUT_DIR = join(dirname(fileURLToPath(import.meta.url)), 'output');
+import {fixtureOutputPath} from './lib/run-paths.mjs';
 
 const fixtureId = process.argv[2];
 if (!fixtureId) {
@@ -13,7 +10,7 @@ if (!fixtureId) {
   process.exit(1);
 }
 
-const filePath = join(OUTPUT_DIR, `${fixtureId}.json`);
+const filePath = fixtureOutputPath(fixtureId);
 const saved = JSON.parse(await readFile(filePath, 'utf8'));
 const {script} = saved;
 

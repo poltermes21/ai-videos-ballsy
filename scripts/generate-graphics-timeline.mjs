@@ -3,27 +3,34 @@
 // component (goal, disallowed goal, card, penalty, substitution, VAR, clear
 // chance). Output feeds the <Sequence> graphics layer in src/ballsy.tsx.
 //
-// Usage: node --env-file=.env scripts/generate-graphics-timeline.mjs <matchId>
+// Usage: node --env-file=.env scripts/generate-graphics-timeline.mjs <runId>
 
 import {readFile, writeFile} from 'node:fs/promises';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {getMatch} from './lib/match-source.mjs';
+import {getMatch, ensureTeamBadge, ensurePlayerPhoto, ensureTournamentLogo} from './lib/match-source.mjs';
 import {computeBlockStartTimes} from './lib/script-timing.mjs';
+import {baseMatchId, fixtureOutputPath} from './lib/run-paths.mjs';
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
-const OUTPUT_DIR = join(SCRIPTS_DIR, 'output');
 const PUBLIC_AUDIO_DIR = join(SCRIPTS_DIR, '..', 'public', 'audio');
 
-const matchId = process.argv[2];
-if (!matchId) {
-  console.error('Usage: node --env-file=.env scripts/generate-graphics-timeline.mjs <matchId>');
+// This is the RUN id (bare matchId for a default run, "<matchId>-<focusSlug>"
+// for a focused one — see scripts/lib/run-paths.mjs) — every path below
+// (reading the saved script/alignment, writing the graphics timeline) is
+// keyed by this full run id, so a focused run never overwrites another
+// run's timeline. getMatch() below still needs the REAL SofaScore match id,
+// recovered via baseMatchId().
+const runId = process.argv[2];
+if (!runId) {
+  console.error('Usage: node --env-file=.env scripts/generate-graphics-timeline.mjs <runId>');
   process.exit(1);
 }
+const matchId = baseMatchId(runId);
 
-const {script} = JSON.parse(await readFile(join(OUTPUT_DIR, `${matchId}.json`), 'utf8'));
+const {script} = JSON.parse(await readFile(fixtureOutputPath(runId), 'utf8'));
 const alignment = JSON.parse(
-  await readFile(join(OUTPUT_DIR, `${matchId}-alignment.json`), 'utf8'),
+  await readFile(fixtureOutputPath(runId, '-alignment'), 'utf8'),
 );
 
 // A graphic anchored to the exact start of its segment lands on the FIRST
@@ -43,7 +50,8 @@ const MIN_DURATION_SECONDS = 3;
 // two missed penalties then the equalizer) gets one graphic per event instead
 // of only the first. Falls back to the old single-event-per-moment shape for
 // scripts generated before per-event tagging existed.
-const taggedEvents = computeBlockStartTimes(script, alignment)
+const blockStartTimes = computeBlockStartTimes(script, alignment);
+const taggedEvents = blockStartTimes
   .filter((b) => b.moment)
   .flatMap((b) => {
     const moment = b.moment;
@@ -94,6 +102,31 @@ const match = getMatch(matchId);
 const shortCode = (name) => (name || '???').replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase();
 const homeTeam = match.homeCode || shortCode(match.home);
 const awayTeam = match.awayCode || shortCode(match.away);
+
+// Real badge/logo images, fetched once and cached under public/ so they're
+// on disk before Remotion ever renders a frame (it can't fetch anything
+// itself). null when this id has no image, or no id at all (old saved
+// scripts predate homeId/awayId) — every graphic below treats that the same
+// as "no badge", not an error.
+const homeBadge = ensureTeamBadge(match.homeId);
+const awayBadge = ensureTeamBadge(match.awayId);
+const tournamentLogo = ensureTournamentLogo(match.tournamentId);
+// Primary kit colour as each side's accent — real, not a generic red/green.
+const homeColor = match.homeColors?.primary ?? null;
+const awayColor = match.awayColors?.primary ?? null;
+const teamProps = {homeTeam, awayTeam, homeBadge, awayBadge, homeColor, awayColor};
+
+// The scorer of a goal/scored-penalty, for the PlayerCard prototype — name +
+// shirt number always (already in the event), a real photo only if this
+// player has one on SofaScore (ensurePlayerPhoto returns null otherwise).
+function scorerProps(goalEvent) {
+  if (!goalEvent?.player) return null;
+  return {
+    name: goalEvent.player,
+    number: goalEvent.playerNumber ?? null,
+    photo: ensurePlayerPhoto(goalEvent.playerId),
+  };
+}
 
 const events = match.events;
 
@@ -170,11 +203,11 @@ for (const ev of taggedEvents) {
       startTime,
       durationSeconds,
       props: {
-        homeTeam,
-        awayTeam,
+        ...teamProps,
         homeScore: matched.homeScore,
         awayScore: matched.awayScore,
         scoringTeam: matched.team,
+        scorer: scorerProps(matched),
       },
     });
   } else if (type === 'goal_disallowed') {
@@ -189,7 +222,7 @@ for (const ev of taggedEvents) {
       type: 'goalDisallowed',
       startTime,
       durationSeconds,
-      props: {homeTeam, awayTeam, homeScore: standing.home, awayScore: standing.away, scoringTeam},
+      props: {...teamProps, homeScore: standing.home, awayScore: standing.away, scoringTeam},
     });
   } else if (type === 'yellow_card' || type === 'red_card') {
     const wantedCardType = type === 'red_card' ? 'red' : 'yellow';
@@ -215,11 +248,13 @@ for (const ev of taggedEvents) {
     );
     let outcome;
     let scoreProps;
+    let scorer = null;
     if (pen && pen.type === 'goal') {
       // A scored penalty is still a goal — carry its real running score so
       // the scoreboard ticks up just like a regular Goal graphic would.
       outcome = 'scored';
       scoreProps = {homeScore: pen.homeScore, awayScore: pen.awayScore, scoringTeam: pen.team};
+      scorer = scorerProps(pen);
     } else if (pen && pen.type === 'penalty_missed') {
       outcome = pen.outcome; // saved | post | out — score doesn't change
       const standing = standingAtMinute(pen.minute);
@@ -237,7 +272,7 @@ for (const ev of taggedEvents) {
       type: 'penalty',
       startTime,
       durationSeconds,
-      props: {outcome, homeTeam, awayTeam, ...scoreProps},
+      props: {outcome, ...teamProps, ...scoreProps, scorer},
     });
   } else if (type === 'substitution') {
     const sub = nearestEvent((e) => e.type === 'substitution', minute);
@@ -267,8 +302,20 @@ for (const ev of taggedEvents) {
   }
 }
 
-const outputPath = join(PUBLIC_AUDIO_DIR, `${matchId}-graphics.json`);
-await writeFile(outputPath, JSON.stringify({graphicsTimeline}, null, 2));
+// Static match identity for the cover card — needed outside of any single
+// event graphic, and this file is already fetched once at render start, so
+// it rides along instead of becoming a second fetch.
+const matchInfo = {
+  ...teamProps,
+  tournament: match.tournament,
+  tournamentLogo,
+  season: match.season,
+  round: match.round,
+  date: match.date,
+};
+
+const outputPath = join(PUBLIC_AUDIO_DIR, `${runId}-graphics.json`);
+await writeFile(outputPath, JSON.stringify({graphicsTimeline, matchInfo}, null, 2));
 
 console.log(`Saved: ${outputPath} (${graphicsTimeline.length} graphics)`);
 console.log(JSON.stringify(graphicsTimeline, null, 2));

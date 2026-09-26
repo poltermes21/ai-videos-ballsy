@@ -3,9 +3,9 @@
 import {readFile, writeFile} from 'node:fs/promises';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {fixtureOutputPath} from './lib/run-paths.mjs';
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
-const OUTPUT_DIR = join(SCRIPTS_DIR, 'output');
 const PUBLIC_AUDIO_DIR = join(SCRIPTS_DIR, '..', 'public', 'audio');
 
 const fixtureId = process.argv[2];
@@ -16,7 +16,7 @@ if (!fixtureId) {
 
 const {segmentOffsets, character_start_times_seconds, character_end_times_seconds} =
   JSON.parse(
-    await readFile(join(OUTPUT_DIR, `${fixtureId}-alignment.json`), 'utf8'),
+    await readFile(fixtureOutputPath(fixtureId, '-alignment'), 'utf8'),
   );
 
 // Cartoons don't hold an extreme expression for the whole time a character

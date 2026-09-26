@@ -5,11 +5,11 @@ import {readFile, unlink, writeFile} from 'node:fs/promises';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {promisify} from 'node:util';
+import {fixtureOutputPath} from './lib/run-paths.mjs';
 
 const execFileAsync = promisify(execFile);
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
-const OUTPUT_DIR = join(SCRIPTS_DIR, 'output');
 const PUBLIC_AUDIO_DIR = join(SCRIPTS_DIR, '..', 'public', 'audio');
 
 const fixtureId = process.argv[2];
@@ -24,7 +24,7 @@ const dialogPath = join(PUBLIC_AUDIO_DIR, `${fixtureId}-dialog.txt`);
 const visemesPath = join(PUBLIC_AUDIO_DIR, `${fixtureId}-visemes.json`);
 
 const {fullText} = JSON.parse(
-  await readFile(join(OUTPUT_DIR, `${fixtureId}-alignment.json`), 'utf8'),
+  await readFile(fixtureOutputPath(fixtureId, '-alignment'), 'utf8'),
 );
 
 console.log('Converting audio to WAV...');
