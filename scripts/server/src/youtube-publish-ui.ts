@@ -77,7 +77,11 @@ function formatPublishedAt(iso: string): string {
 }
 
 export function renderYoutubePublishBlock(
-  matchId: string,
+  // The run being published, already URL-encoded as a query string by the
+  // caller (`kind=match&matchId=..&runSlug=..`, or the player/prematch
+  // equivalent) — this block works the same for a match, player or preview
+  // video, so it never needs to know which.
+  runQuery: string,
   status: YoutubePublishStatus | null,
   metadata: PublishMetadata | null,
   // Called the moment a publish succeeds, so the caller (app.ts) can update
@@ -122,7 +126,7 @@ export function renderYoutubePublishBlock(
   function showConnect(): void {
     const connectBtn = h('button', {type: 'button', class: 'btn primary'}, ['Connect YouTube']);
     connectBtn.addEventListener('click', () => {
-      window.location.href = `/api/publish/youtube/auth?matchId=${encodeURIComponent(matchId)}`;
+      window.location.href = `/api/publish/youtube/auth?${runQuery}`;
     });
     setBody(
       h('p', {class: 'hint'}, [
@@ -199,7 +203,7 @@ export function renderYoutubePublishBlock(
       bar.setAttribute('style', 'width:0%');
 
       const source = new EventSource(
-        `/api/publish/youtube?matchId=${encodeURIComponent(matchId)}&privacyStatus=${encodeURIComponent(privacyStatus)}`,
+        `/api/publish/youtube?${runQuery}&privacyStatus=${encodeURIComponent(privacyStatus)}`,
       );
 
       const stop = (): void => {

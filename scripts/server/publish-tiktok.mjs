@@ -16,11 +16,10 @@ import {randomBytes} from 'node:crypto';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import express from 'express';
+import {fallbackHeadline, parseRunRef, runHrefOf, scriptPathOf, videoLocationOf} from './run-ref.mjs';
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SERVER_DIR, '..', '..');
-const OUTPUT_DIR = join(REPO_ROOT, 'scripts', 'output');
-const OUT_DIR = join(REPO_ROOT, 'out');
 const CREDENTIALS_PATH = join(SERVER_DIR, '.credentials', 'tiktok.json');
 
 // TikTok's documented v2 endpoints. The authorize page is on www.tiktok.com;
@@ -77,12 +76,6 @@ const STATUS_POLL_INTERVAL_MS = 3000;
 const STATUS_POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
 const router = express.Router();
-
-// Match ids are SofaScore event ids (always numeric) and get joined into file
-// paths, so anything else is rejected — same convention as index.mjs.
-function isValidMatchId(matchId) {
-  return /^\d+$/.test(String(matchId));
-}
 
 // Same one-liner /api/render uses. Deliberately duplicated rather than
 // imported: this module stays standalone so index.mjs only has to mount it.
@@ -265,8 +258,8 @@ router.get('/auth', (req, res) => {
       .send('TIKTOK_CLIENT_KEY is not set. Add it to .env and restart Ballsy Studio (see the README).');
     return;
   }
-  const matchId = String(req.query.matchId || '');
-  const returnTo = isValidMatchId(matchId) ? `/match/${matchId}` : '/';
+  const ref = parseRunRef(req.query);
+  const returnTo = ref ? runHrefOf(ref) : '/';
   const params = new URLSearchParams({
     client_key: clientKey,
     scope: SCOPE,
@@ -325,12 +318,9 @@ router.get('/callback', async (req, res) => {
 // ("title") is the whole of it, hashtags included. So the generated
 // description is left for platforms that do have one, and the hashtags are
 // appended here where they'll actually work.
-function buildTitle(metadata, matchInfo, matchId) {
-  const base =
-    metadata?.title?.trim() ||
-    (matchInfo
-      ? `${matchInfo.home} ${matchInfo.homeScore ?? '?'}-${matchInfo.awayScore ?? '?'} ${matchInfo.away}`
-      : `Ballsy match recap ${matchId}`);
+function buildTitle(saved, ref) {
+  const metadata = saved?.publishMetadata;
+  const base = metadata?.title?.trim() || fallbackHeadline(saved, ref);
   const tags = (metadata?.hashtags ?? [])
     .map((tag) => String(tag).trim().replace(/^#+/, ''))
     .filter(Boolean)
@@ -410,11 +400,12 @@ async function waitForPublish(accessToken, publishId, onProgress) {
   );
 }
 
-// Publishes out/<matchId>.mp4, streaming progress as SSE — same shape as
-// /api/render in index.mjs, so the frontend consumes both identically.
+// Publishes a match run's rendered video, streaming progress as SSE — same
+// shape as /api/render in index.mjs, so the frontend consumes both
+// identically.
 router.get('/', async (req, res) => {
-  const matchId = String(req.query.matchId || '');
-  if (!isValidMatchId(matchId)) {
+  const ref = parseRunRef(req.query);
+  if (!ref) {
     res.status(400).end();
     return;
   }
@@ -428,15 +419,19 @@ router.get('/', async (req, res) => {
   try {
     const accessToken = await getAccessToken();
 
-    const videoPath = join(OUT_DIR, `${matchId}.mp4`);
-    const {size: videoSize} = await stat(videoPath).catch(() => {
-      throw new Error(`No rendered video at out/${matchId}.mp4 — render it first.`);
-    });
-    if (videoSize === 0) throw new Error(`out/${matchId}.mp4 is empty — re-render it.`);
-
-    const scriptPath = join(OUTPUT_DIR, `${matchId}.json`);
+    // publishMetadata AND matchInfo (which decides the video's nested path)
+    // both come from the saved script — read it before locating the video.
+    const scriptPath = scriptPathOf(ref);
     const saved = JSON.parse(await readFile(scriptPath, 'utf8'));
-    const title = buildTitle(saved.publishMetadata, saved.matchInfo, matchId);
+    const video = videoLocationOf(ref, saved.matchInfo);
+    const videoPath = video.path;
+    const videoLabel = `out${video.url.replace(/^\/videos/, '')}`;
+    const {size: videoSize} = await stat(videoPath).catch(() => {
+      throw new Error(`No rendered video at ${videoLabel} — render it first.`);
+    });
+    if (videoSize === 0) throw new Error(`${videoLabel} is empty — re-render it.`);
+
+    const title = buildTitle(saved, ref);
 
     const plan = planChunks(videoSize);
     sendEvent(res, {

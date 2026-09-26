@@ -60,7 +60,11 @@ function formatDate(iso: string): string {
 }
 
 export function renderTiktokPublishBlock(
-  matchId: string,
+  // The run being published, already URL-encoded as a query string by the
+  // caller (`kind=match&matchId=..&runSlug=..`, or the player/prematch
+  // equivalent) — this block works the same for a match, player or preview
+  // video, so it never needs to know which.
+  runQuery: string,
   status: TiktokPublishStatus | null,
   metadata: PublishMetadata | null,
   // Called the moment a publish succeeds, so the caller (app.ts) can update
@@ -129,7 +133,9 @@ export function renderTiktokPublishBlock(
       log.textContent = '';
       log.classList.remove('hidden');
 
-      const source = new EventSource(`/api/publish/tiktok?matchId=${encodeURIComponent(matchId)}`);
+      const source = new EventSource(
+        `/api/publish/tiktok?${runQuery}`,
+      );
       let finished = false;
       const stop = (): void => {
         finished = true;
@@ -212,7 +218,7 @@ export function renderTiktokPublishBlock(
     // to this match page anyway.
     const connectBtn = h('button', {type: 'button', class: 'btn primary'}, ['Connect TikTok']);
     connectBtn.addEventListener('click', () => {
-      location.href = `/api/publish/tiktok/auth?matchId=${encodeURIComponent(matchId)}`;
+      location.href = `/api/publish/tiktok/auth?${runQuery}`;
     });
     setBody(
       h('p', {class: 'hint'}, [

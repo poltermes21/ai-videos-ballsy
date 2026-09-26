@@ -20,11 +20,18 @@ import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import express from 'express';
 import {google} from 'googleapis';
+import {
+  decodeRunRef,
+  encodeRunRef,
+  fallbackHeadline,
+  parseRunRef,
+  runHrefOf,
+  scriptPathOf,
+  videoLocationOf,
+} from './run-ref.mjs';
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SERVER_DIR, '..', '..');
-const OUTPUT_DIR = join(REPO_ROOT, 'scripts', 'output');
-const OUT_DIR = join(REPO_ROOT, 'out');
 const CREDENTIALS_PATH = join(SERVER_DIR, '.credentials', 'youtube.json');
 
 // Upload-only scope: lets Ballsy Studio add a video to the authorised channel
@@ -48,12 +55,6 @@ const router = express.Router();
 
 function sendEvent(res, data) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
-}
-
-// Match ids are SofaScore event ids (always numeric) and get joined into file
-// paths — same rule as index.mjs's isValidMatchId.
-function isValidMatchId(matchId) {
-  return /^\d+$/.test(String(matchId));
 }
 
 function normalisePrivacyStatus(value) {
@@ -133,14 +134,12 @@ async function getAuthorisedClient() {
 // Video metadata — built from the publishMetadata the script agent wrote
 // ---------------------------------------------------------------------------
 
-async function readScriptFile(matchId) {
-  return JSON.parse(await readFile(join(OUTPUT_DIR, `${matchId}.json`), 'utf8'));
-}
-
-function matchHeadline(saved, matchId) {
-  const info = saved?.matchInfo;
-  if (!info?.home || !info?.away) return `Ballsy recap — match ${matchId}`;
-  return `${info.home} ${info.homeScore ?? '?'}-${info.awayScore ?? '?'} ${info.away} — Ballsy recap`;
+// Any video (a run of a match, player or preview) can be published — the
+// video and script locations come from run-ref.mjs, the same place the render
+// step gets them, so this can never look somewhere other than where the video
+// actually landed.
+async function readScriptFile(ref) {
+  return JSON.parse(await readFile(scriptPathOf(ref), 'utf8'));
 }
 
 // "#ManCity" and "ManCity" are the same YouTube tag; the # only means anything
@@ -168,11 +167,20 @@ function hashtagsToTags(hashtags) {
 // Hashtags go in the description as well as in tags on purpose: YouTube only
 // renders the clickable "#foo" chips above a video's title from the
 // description, never from the tags field.
-function buildSnippet(saved, matchId) {
+// Ballsy's composition is vertical (1080x1920) specifically so its videos
+// qualify as real Shorts, not just square ones YouTube pillarboxes. #Shorts
+// in the title isn't strictly required for classification but still helps
+// it, especially for non-mobile uploads — cheap to add, no reason not to.
+const SHORTS_TAG = '#Shorts';
+
+function buildSnippet(saved, ref) {
   const metadata = saved?.publishMetadata ?? null;
-  const rawTitle = String(metadata?.title || '').trim() || matchHeadline(saved, matchId);
+  const rawTitle = String(metadata?.title || '').trim() || fallbackHeadline(saved, ref);
   // < and > are rejected outright by videos.insert.
-  const title = rawTitle.replace(/[<>]/g, '').slice(0, MAX_TITLE_LENGTH);
+  const cleanTitle = rawTitle.replace(/[<>]/g, '');
+  const title = cleanTitle.toLowerCase().includes(SHORTS_TAG.toLowerCase())
+    ? cleanTitle.slice(0, MAX_TITLE_LENGTH)
+    : `${cleanTitle.slice(0, MAX_TITLE_LENGTH - SHORTS_TAG.length - 1)} ${SHORTS_TAG}`;
 
   const hashtags = (Array.isArray(metadata?.hashtags) ? metadata.hashtags : [])
     .map((tag) => `#${String(tag).replace(/^#+/, '').trim()}`)
@@ -223,14 +231,14 @@ router.get('/auth', (req, res) => {
     res.status(500).type('text/plain').send(`${err.message}`);
     return;
   }
-  // Round-trips the match the user started from, so the callback can put them
-  // back on that page instead of the Studio home page.
-  const matchId = String(req.query.matchId || '');
+  // Round-trips the run (any kind) the user started from, so the callback can
+  // put them back on that exact page instead of the Studio home page.
+  const ref = parseRunRef(req.query);
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
     scope: SCOPES,
-    ...(isValidMatchId(matchId) ? {state: matchId} : {}),
+    ...(ref ? {state: encodeRunRef(ref)} : {}),
   });
   res.redirect(url);
 });
@@ -256,8 +264,8 @@ router.get('/callback', async (req, res) => {
       );
     }
     await writeStoredCredentials(tokens.refresh_token);
-    const state = String(req.query.state || '');
-    res.redirect(isValidMatchId(state) ? `/match/${state}` : '/');
+    const ref = decodeRunRef(req.query.state);
+    res.redirect(ref ? runHrefOf(ref) : '/');
   } catch (err) {
     res.status(500).type('text/plain').send(`Could not complete YouTube authorisation: ${describeApiError(err)}`);
   }
@@ -270,8 +278,8 @@ router.get('/callback', async (req, res) => {
 // Only ever reached from an explicit click on "Publish to YouTube" for one
 // specific match; there is no batch or automatic path into it by design.
 router.get('/', async (req, res) => {
-  const matchId = String(req.query.matchId || '');
-  if (!isValidMatchId(matchId)) {
+  const ref = parseRunRef(req.query);
+  if (!ref) {
     res.status(400).end();
     return;
   }
@@ -284,9 +292,23 @@ router.get('/', async (req, res) => {
   });
 
   try {
-    const videoPath = join(OUT_DIR, `${matchId}.mp4`);
+    // publishMetadata AND matchInfo (which decides the video's nested path)
+    // both come from the saved script — read it first, unlike before, since
+    // finding the video now depends on it too.
+    let saved = null;
+    try {
+      saved = await readScriptFile(ref);
+    } catch {
+      saved = null;
+    }
+    if (!saved) {
+      throw new Error('No approved script found for this run — generate and approve it before publishing.');
+    }
+
+    const video = videoLocationOf(ref, saved.matchInfo);
+    const videoPath = video.path;
     if (!existsSync(videoPath)) {
-      throw new Error(`No rendered video at out/${matchId}.mp4 — render the video before publishing.`);
+      throw new Error(`No rendered video at out${video.url.replace(/^\/videos/, '')} — render the video before publishing.`);
     }
 
     const auth = await getAuthorisedClient();
@@ -294,16 +316,7 @@ router.get('/', async (req, res) => {
       throw new Error('Not connected to YouTube. Click "Connect YouTube" first.');
     }
 
-    // publishMetadata is written by generate-script.mjs; scripts generated
-    // before that existed simply don't have it, so the title/description fall
-    // back to the match itself rather than failing the upload.
-    let saved = null;
-    try {
-      saved = await readScriptFile(matchId);
-    } catch {
-      saved = null;
-    }
-    const snippet = buildSnippet(saved, matchId);
+    const snippet = buildSnippet(saved, ref);
 
     sendEvent(res, {type: 'step', label: `Uploading "${snippet.title}" as ${privacyStatus}...`});
 
@@ -359,7 +372,7 @@ router.get('/', async (req, res) => {
     // handler in index.mjs) so re-opening the match shows "Published" instead
     // of offering to upload the same video a second time.
     if (saved) {
-      const filePath = join(OUTPUT_DIR, `${matchId}.json`);
+      const filePath = scriptPathOf(ref);
       const parsed = JSON.parse(await readFile(filePath, 'utf8'));
       parsed.youtube = published;
       await writeFile(filePath, JSON.stringify(parsed, null, 2));
@@ -367,6 +380,12 @@ router.get('/', async (req, res) => {
 
     sendEvent(res, {type: 'done', ...published});
   } catch (err) {
+    // Temporary: describeApiError() only surfaces err.response.data.error's
+    // top-level message ("Unauthorized" alone isn't enough to tell a scope
+    // problem from a "no channel on this account" problem from something
+    // else) — log the full body server-side so a real failure can actually
+    // be diagnosed instead of guessed at.
+    console.error('YouTube publish failed:', JSON.stringify(err?.response?.data ?? err?.errors ?? err?.message, null, 2));
     sendEvent(res, {type: 'error', message: describeApiError(err)});
   } finally {
     res.end();
