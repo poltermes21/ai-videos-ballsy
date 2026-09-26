@@ -1,27 +1,9 @@
-import React, {useEffect, useRef, useState} from 'react';
-import {
-  AbsoluteFill,
-  Audio,
-  continueRender,
-  delayRender,
-  Easing,
-  interpolate,
-  Sequence,
-  staticFile,
-  useCurrentFrame,
-  useVideoConfig,
-} from 'remotion';
-import Rive from '@rive-app/canvas-advanced';
-import type {
-  Artboard,
-  RiveCanvas,
-  SMIInput,
-  StateMachineInstance,
-  WrappedRenderer,
-} from '@rive-app/canvas-advanced';
-import type {Caption} from '@remotion/captions';
-import {Captions} from './Captions';
+import React, {useEffect, useState} from 'react';
+import {AbsoluteFill, continueRender, delayRender, Sequence, staticFile, useVideoConfig} from 'remotion';
+import {BallsyCam, ROOT_BACKGROUND} from './BallsyCam';
 import {Background} from './Background';
+import {CoverCard} from './CoverCard';
+import {PitchSizeProvider} from './PitchSizeContext';
 import {GoalGraphic} from './graphics/GoalGraphic';
 import {GoalDisallowedGraphic} from './graphics/GoalDisallowedGraphic';
 import {CardGraphic} from './graphics/CardGraphic';
@@ -30,33 +12,42 @@ import {SubstitutionGraphic} from './graphics/SubstitutionGraphic';
 import {ClearChanceGraphic} from './graphics/ClearChanceGraphic';
 import {VarReviewGraphic} from './graphics/VarReviewGraphic';
 
-type LoadedRive = {
-  riveCanvas: RiveCanvas;
-  artboard: Artboard;
-  stateMachine: StateMachineInstance;
-  visemeInput: SMIInput;
-  expressionInput: SMIInput;
-  renderer: WrappedRenderer;
-};
-
-type MouthCue = {
-  start: number;
-  end: number;
-  value: string;
-};
-
-type ExpressionCue = {
-  start: number;
-  end: number;
-  expression: string;
-};
-
 type ScoreProps = {
   homeTeam: string;
   awayTeam: string;
   homeScore: number;
   awayScore: number;
   scoringTeam: 'home' | 'away';
+  // Real badge/kit-colour, from SofaScore — optional so a graphics.json
+  // generated before this existed still matches (falls back to text codes).
+  homeBadge?: string | null;
+  awayBadge?: string | null;
+  homeColor?: string | null;
+  awayColor?: string | null;
+};
+
+// The scorer of a goal/scored-penalty — name + shirt number always, a real
+// SofaScore photo only if this player has one (PlayerCard falls back to a
+// plain number badge otherwise). See CLAUDE.md for why a real photo is used
+// here at all.
+type Scorer = {name: string; number: number | null; photo: string | null};
+
+// Static match identity — cover card + the persistent mini-scoreboard both
+// need this outside of any single event graphic. Emitted once, alongside
+// graphicsTimeline in the same file (see generate-graphics-timeline.mjs), so
+// it doesn't need its own fetch.
+type MatchInfo = {
+  homeTeam: string;
+  awayTeam: string;
+  homeBadge: string | null;
+  awayBadge: string | null;
+  homeColor: string | null;
+  awayColor: string | null;
+  tournament: string | null;
+  tournamentLogo: string | null;
+  season: string | null;
+  round: number | null;
+  date: number | null;
 };
 
 // Discriminated union — one variant per event graphic. Shapes must match the
@@ -66,10 +57,10 @@ type ScoreProps = {
 // optional for backward compat with graphics.json files generated before
 // this existed — GRAPHIC_DURATION below is the fallback for those.
 type GraphicsEntry = {startTime: number; durationSeconds?: number} & (
-  | {type: 'goal'; props: ScoreProps}
+  | {type: 'goal'; props: ScoreProps & {scorer?: Scorer | null}}
   | {type: 'goalDisallowed'; props: ScoreProps}
   | {type: 'card'; props: {cardType: 'yellow' | 'red'; minute: number}}
-  | {type: 'penalty'; props: {outcome: 'scored' | 'saved' | 'post' | 'out'} & ScoreProps}
+  | {type: 'penalty'; props: {outcome: 'scored' | 'saved' | 'post' | 'out'} & ScoreProps & {scorer?: Scorer | null}}
   | {
       type: 'substitution';
       props: {
@@ -113,290 +104,91 @@ function renderGraphic(entry: GraphicsEntry) {
   }
 }
 
-type AvatarKeyframe = {
-  time: number;
-  scale: number;
-  x: number;
-  y: number;
-};
-
-// Must match FLOAT_SCALE in scripts/generate-avatar-timeline.mjs.
-const AVATAR_FLOAT_SCALE = 0.42;
-
-const VISEME_INPUT_NAME = 'viseme';
-const EXPRESSION_INPUT_NAME = 'expression';
-
-// Test fixture until step 11 (frontend match selector) picks a real one.
-// SofaScore event id (Eredivisie 25/26 — SC Telstar 2-2 Excelsior). Exported
-// so Root.tsx's calculateMetadata can size the composition to this fixture's
-// real audio length without duplicating the id.
-export const FIXTURE_ID = '14081810';
-
-const EXPRESSION_NAMES = [
-  'neutral',
-  'excited',
-  'angry',
-  'disappointed',
-  'surprised',
-];
-const EXPRESSION_TO_INDEX: Record<string, number> = Object.fromEntries(
-  EXPRESSION_NAMES.map((name, index) => [name, index]),
-);
-
-// Rhubarb's Preston Blair shapes (A-H, X for silence) mapped to Ballsy's
-// 9 viseme timelines (see project_summary.MD step 6).
-const RHUBARB_TO_VISEME: Record<string, number> = {
-  X: 0, // rest / silence
-  D: 1, // AI — wide open
-  C: 2, // E — open (EH/AE)
-  E: 3, // O — rounded open (AO/ER)
-  F: 4, // U — puckered (UW/OW/W)
-  A: 5, // MBP — closed
-  G: 6, // FV — teeth on lip
-  H: 7, // L — tongue up
-  B: 8, // etc — other consonants
-};
-
-const findViseme = (mouthCues: MouthCue[], timeSeconds: number): {index: number} => {
-  for (const cue of mouthCues) {
-    if (timeSeconds >= cue.start && timeSeconds < cue.end) {
-      return {index: RHUBARB_TO_VISEME[cue.value] ?? 0};
-    }
-  }
-  return {index: 0};
-};
-
-const findExpression = (expressionCues: ExpressionCue[], timeSeconds: number): {index: number} => {
-  for (const cue of expressionCues) {
-    if (timeSeconds >= cue.start && timeSeconds < cue.end) {
-      return {index: EXPRESSION_TO_INDEX[cue.expression] ?? 0};
-    }
-  }
-  return {index: 0};
-};
+// SofaScore event id — FC Barcelona 7-2 Real Racing Club, LaLiga 26/27.
+// Exported so Root.tsx's calculateMetadata can size the composition to this
+// fixture's real audio length without duplicating the id.
+export const FIXTURE_ID = '16416339-the-uncalled-fouls-by-romero-and-kang-in-lee-on-valverde-and-bellingham-that-mourinho-named-together-and-said-deserved-two-red-cards-plus-his-press-conference-reaction';
 
 export const Ballsy: React.FC = () => {
-  const frame = useCurrentFrame();
-  const {width, height, fps} = useVideoConfig();
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [handle] = useState(() =>
-    delayRender('Loading ballsy.riv + lip-sync data'),
-  );
-  const loadedRef = useRef<LoadedRive | null>(null);
-  const mouthCuesRef = useRef<MouthCue[]>([]);
-  const expressionCuesRef = useRef<ExpressionCue[]>([]);
-  const lastFrameRef = useRef(0);
-  const [ready, setReady] = useState(false);
+  const {width, fps} = useVideoConfig();
+  const [handle] = useState(() => delayRender('Loading match graphics timeline'));
   const [graphicsTimeline, setGraphicsTimeline] = useState<GraphicsEntry[]>([]);
-  const [avatarKeyframes, setAvatarKeyframes] = useState<AvatarKeyframe[]>([]);
-  const [captions, setCaptions] = useState<Caption[]>([]);
+  const [matchInfo, setMatchInfo] = useState<MatchInfo | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-
-    Promise.all([
-      Rive({
-        locateFile: () =>
-          'https://unpkg.com/@rive-app/canvas-advanced@2.31.5/rive.wasm',
-      }),
-      fetch(staticFile(`audio/${FIXTURE_ID}-visemes.json`)).then(
-        (res) => res.json() as Promise<{mouthCues: MouthCue[]}>,
-      ),
-      fetch(staticFile(`audio/${FIXTURE_ID}-expressions.json`)).then(
-        (res) => res.json() as Promise<{expressionCues: ExpressionCue[]}>,
-      ),
-      fetch(staticFile(`audio/${FIXTURE_ID}-graphics.json`)).then(
-        (res) => res.json() as Promise<{graphicsTimeline: GraphicsEntry[]}>,
-      ),
-      fetch(staticFile(`audio/${FIXTURE_ID}-avatar.json`)).then(
-        (res) => res.json() as Promise<{keyframes: AvatarKeyframe[]}>,
-      ),
-      fetch(staticFile(`audio/${FIXTURE_ID}-captions.json`)).then(
-        (res) => res.json() as Promise<{captions: Caption[]}>,
-      ),
-    ]).then(async ([riveCanvas, lipSyncData, expressionData, graphicsData, avatarData, captionsData]) => {
-      const buffer = await fetch(staticFile('ballsy.riv')).then((res) =>
-        res.arrayBuffer(),
-      );
-      const file = await riveCanvas.load(new Uint8Array(buffer));
-      const artboard = file.defaultArtboard();
-      const stateMachine = new riveCanvas.StateMachineInstance(
-        artboard.stateMachineByIndex(0),
-        artboard,
-      );
-
-      let visemeInput: SMIInput | null = null;
-      let expressionInput: SMIInput | null = null;
-      for (let i = 0; i < stateMachine.inputCount(); i++) {
-        const input = stateMachine.input(i);
-        if (input.name === VISEME_INPUT_NAME) {
-          // The generic SMIInput wrapper's `.value` setter is a no-op until
-          // downcast to the concrete typed accessor.
-          visemeInput = input.asNumber();
-        } else if (input.name === EXPRESSION_INPUT_NAME) {
-          expressionInput = input.asNumber();
-        }
-      }
-
-      if (!visemeInput) {
-        throw new Error(
-          `No "${VISEME_INPUT_NAME}" input found on the state machine. ` +
-            'Check the input name in the Rive editor.',
-        );
-      }
-
-      if (!expressionInput) {
-        throw new Error(
-          `No "${EXPRESSION_INPUT_NAME}" input found on the state machine. ` +
-            'Check the input name in the Rive editor.',
-        );
-      }
-
-      if (cancelled || !canvasRef.current) {
-        return;
-      }
-
-      // Created once and reused every frame — never call makeRenderer() per
-      // frame, it allocates a new renderer that's never deleted.
-      const renderer = riveCanvas.makeRenderer(canvasRef.current);
-
-      loadedRef.current = {
-        riveCanvas,
-        artboard,
-        stateMachine,
-        visemeInput,
-        expressionInput,
-        renderer,
-      };
-      mouthCuesRef.current = lipSyncData.mouthCues;
-      expressionCuesRef.current = expressionData.expressionCues;
-      setGraphicsTimeline(graphicsData.graphicsTimeline);
-      setAvatarKeyframes(avatarData.keyframes);
-      setCaptions(captionsData.captions);
-      setReady(true);
-      continueRender(handle);
-    });
-
+    fetch(staticFile(`audio/${FIXTURE_ID}-graphics.json`))
+      .then((res) => res.json() as Promise<{graphicsTimeline: GraphicsEntry[]; matchInfo: MatchInfo | null}>)
+      .then((data) => {
+        if (cancelled) return;
+        setGraphicsTimeline(data.graphicsTimeline);
+        setMatchInfo(data.matchInfo ?? null);
+        continueRender(handle);
+      });
     return () => {
       cancelled = true;
-      loadedRef.current?.renderer.delete();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!ready || !loadedRef.current || !canvasRef.current) {
-      return;
-    }
-
-    const {riveCanvas, artboard, stateMachine, visemeInput, expressionInput, renderer} =
-      loadedRef.current;
-
-    if (canvasRef.current.width !== width || canvasRef.current.height !== height) {
-      canvasRef.current.width = width;
-      canvasRef.current.height = height;
-    }
-
-    const timeSeconds = frame / fps;
-    const {index: visemeIndex} = findViseme(mouthCuesRef.current, timeSeconds);
-    visemeInput.value = visemeIndex;
-
-    const {index: expressionIndex} = findExpression(expressionCuesRef.current, timeSeconds);
-    expressionInput.value = expressionIndex;
-
-    const diffSeconds = Math.max(frame - lastFrameRef.current, 0) / fps;
-    stateMachine.advanceAndApply(diffSeconds);
-    artboard.advance(diffSeconds);
-
-    renderer.clear();
-    renderer.save();
-    renderer.align(
-      riveCanvas.Fit.contain,
-      riveCanvas.Alignment.center,
-      {minX: 0, minY: 0, maxX: width, maxY: height},
-      artboard.bounds,
-    );
-    artboard.draw(renderer);
-    renderer.restore();
-    riveCanvas.resolveAnimationFrame();
-
-    lastFrameRef.current = frame;
-  }, [frame, ready, width, height, fps]);
-
-  const timeSeconds = frame / fps;
-  const avatarTimes = avatarKeyframes.map((k) => k.time);
-  const avatarScaleValues = avatarKeyframes.map((k) => k.scale);
-  const avatarXValues = avatarKeyframes.map((k) => k.x);
-  const avatarYValues = avatarKeyframes.map((k) => k.y);
-
-  const avatarEasing = Easing.bezier(0.33, 1, 0.68, 1);
-  const baseScale =
-    avatarTimes.length > 0
-      ? interpolate(timeSeconds, avatarTimes, avatarScaleValues, {
-          extrapolateLeft: 'clamp',
-          extrapolateRight: 'clamp',
-          easing: avatarEasing,
-        })
-      : 1;
-  const baseX =
-    avatarTimes.length > 0
-      ? interpolate(timeSeconds, avatarTimes, avatarXValues, {
-          extrapolateLeft: 'clamp',
-          extrapolateRight: 'clamp',
-          easing: avatarEasing,
-        })
-      : 0;
-  const baseY =
-    avatarTimes.length > 0
-      ? interpolate(timeSeconds, avatarTimes, avatarYValues, {
-          extrapolateLeft: 'clamp',
-          extrapolateRight: 'clamp',
-          easing: avatarEasing,
-        })
-      : 0;
-
-  // Fades in/out with the scale transition, so the organic bob only shows up
-  // while actually floating (not during the big & centered hook/outro).
-  const floatingAmount = interpolate(baseScale, [AVATAR_FLOAT_SCALE, 1], [1, 0], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  });
-  const bobX = Math.sin((timeSeconds * 2 * Math.PI) / 2.6) * 14 * floatingAmount;
-  const bobY = Math.sin((timeSeconds * 2 * Math.PI) / 3.1 + 1) * 10 * floatingAmount;
-  const bobScale = Math.sin((timeSeconds * 2 * Math.PI) / 4) * 0.03 * floatingAmount;
-
-  const avatarScale = baseScale + bobScale;
-  const avatarX = baseX * width + bobX;
-  const avatarY = baseY * height + bobY;
-
   return (
-    <AbsoluteFill>
-      <Background />
-      <Audio src={staticFile(`audio/${FIXTURE_ID}.mp3`)} />
-      {graphicsTimeline.map((entry, i) => {
-        const durationInFrames =
-          entry.durationSeconds != null
-            ? Math.round(entry.durationSeconds * fps)
-            : GRAPHIC_DURATION[entry.type];
-        return (
-          <Sequence key={i} from={Math.round(entry.startTime * fps)} durationInFrames={durationInFrames}>
-            {renderGraphic(entry)}
-          </Sequence>
-        );
-      })}
-      {/* Renders after the event graphics so Ballsy sits in front of them. */}
-      <div
-        style={{
-          position: 'absolute',
-          width,
-          height,
-          translate: `${avatarX}px ${avatarY}px`,
-          scale: avatarScale,
-        }}
+    <AbsoluteFill style={{background: ROOT_BACKGROUND}}>
+      <BallsyCam
+        fixtureId={FIXTURE_ID}
+        coverCard={
+          matchInfo && (
+            <Sequence durationInFrames={75} layout="none">
+              <CoverCard
+                tournament={matchInfo.tournament}
+                tournamentLogo={matchInfo.tournamentLogo}
+                round={matchInfo.round}
+                date={matchInfo.date}
+              />
+            </Sequence>
+          )
+        }
       >
-        <canvas ref={canvasRef} width={width} height={height} />
-      </div>
-      <Captions captions={captions} />
+        {({camHeight, contentHeight, contentSafeHeight, contentOpacity}) => (
+          // The pitch — confined below the cam, filled edge-to-edge by the
+          // grass (no dead gap at the very bottom). Event graphics render in
+          // a shorter inner layer (contentSafeHeight) instead: YouTube
+          // Shorts/TikTok draw their own UI over roughly the bottom fifth of
+          // the frame — confirmed against a real published Short — so
+          // graphics stay clear of it while the grass still reaches the true
+          // bottom edge underneath them. PitchSizeProvider tells the few
+          // graphics that do pixel math (Penalty/ClearChance/Background) the
+          // size of whichever layer they're actually in — see
+          // PitchSizeContext.tsx.
+          <div
+            style={{
+              position: 'absolute',
+              top: camHeight,
+              left: 0,
+              width: '100%',
+              height: contentHeight,
+              overflow: 'hidden',
+              opacity: contentOpacity,
+            }}
+          >
+            <PitchSizeProvider value={{width, height: contentHeight}}>
+              <Background />
+            </PitchSizeProvider>
+            <div style={{position: 'absolute', top: 0, left: 0, width: '100%', height: contentSafeHeight, overflow: 'hidden'}}>
+              <PitchSizeProvider value={{width, height: contentSafeHeight}}>
+                {graphicsTimeline.map((entry, i) => {
+                  const durationInFrames =
+                    entry.durationSeconds != null ? Math.round(entry.durationSeconds * fps) : GRAPHIC_DURATION[entry.type];
+                  return (
+                    <Sequence key={i} from={Math.round(entry.startTime * fps)} durationInFrames={durationInFrames}>
+                      {renderGraphic(entry)}
+                    </Sequence>
+                  );
+                })}
+              </PitchSizeProvider>
+            </div>
+          </div>
+        )}
+      </BallsyCam>
     </AbsoluteFill>
   );
 };

@@ -1,5 +1,6 @@
 import React from 'react';
 import {AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig} from 'remotion';
+import {usePitchSize} from './PitchSizeContext';
 
 // Flat-cartoon football pitch — fills the "floating on blank white" gap
 // without breaking the show's established look (bold flat shapes, black
@@ -14,6 +15,7 @@ const STRIPE_WIDTH = 120; // px per mow stripe, in composition space (1080 wide)
 export const Background: React.FC = () => {
   const frame = useCurrentFrame();
   const {fps, durationInFrames} = useVideoConfig();
+  const {width, height} = usePitchSize();
   const t = frame / fps;
 
   // Slow one-way Ken Burns drift over the whole runtime, so the pitch never
@@ -50,10 +52,10 @@ export const Background: React.FC = () => {
         {/* Pitch markings: halfway line + centre circle, oversized/cropped
             like a tight zoom on the centre circle rather than a full pitch
             view. */}
-        <svg width="100%" height="100%" viewBox="0 0 1080 1080" style={{position: 'absolute', inset: 0}}>
-          <line x1={540} y1={0} x2={540} y2={1080} stroke={LINE_COLOR} strokeWidth={6} />
-          <circle cx={540} cy={540} r={230} fill="none" stroke={LINE_COLOR} strokeWidth={6} />
-          <circle cx={540} cy={540} r={10} fill={LINE_COLOR} />
+        <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} style={{position: 'absolute', inset: 0}}>
+          <line x1={width / 2} y1={0} x2={width / 2} y2={height} stroke={LINE_COLOR} strokeWidth={6} />
+          <circle cx={width / 2} cy={height / 2} r={230} fill="none" stroke={LINE_COLOR} strokeWidth={6} />
+          <circle cx={width / 2} cy={height / 2} r={10} fill={LINE_COLOR} />
         </svg>
       </AbsoluteFill>
       {/* Soft floodlight sweep — ambient motion so quiet stretches (no event

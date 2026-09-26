@@ -1,6 +1,6 @@
 import React from 'react';
 import {AbsoluteFill, Easing, Img, Interactive, interpolate, staticFile, useCurrentFrame} from 'remotion';
-import {COLORS} from './shared';
+import {COLORS, TeamMark} from './shared';
 import {displayFontFamily} from '../fonts';
 
 type GoalDisallowedGraphicProps = {
@@ -10,6 +10,10 @@ type GoalDisallowedGraphicProps = {
   homeScore: number;
   awayScore: number;
   scoringTeam: 'home' | 'away';
+  homeBadge?: string | null;
+  awayBadge?: string | null;
+  homeColor?: string | null;
+  awayColor?: string | null;
 };
 
 // Generic "goal disallowed" — works for any reason (offside, foul, handball…):
@@ -21,6 +25,10 @@ export const GoalDisallowedGraphic: React.FC<GoalDisallowedGraphicProps> = ({
   homeScore,
   awayScore,
   scoringTeam,
+  homeBadge,
+  awayBadge,
+  homeColor,
+  awayColor,
 }) => {
   const frame = useCurrentFrame();
 
@@ -97,11 +105,11 @@ export const GoalDisallowedGraphic: React.FC<GoalDisallowedGraphicProps> = ({
         name="Scoreboard"
         style={{position: 'absolute', bottom: '8%', left: '50%', translate: '-50%', display: 'flex', alignItems: 'center', gap: 20, padding: '14px 32px', borderRadius: 999, background: 'black', border: '3px solid white', color: 'white', fontFamily: displayFontFamily, fontSize: 34}}
       >
-        <span>{homeTeam}</span>
+        <TeamMark code={homeTeam} badge={homeBadge} color={homeColor} />
         <span style={{display: 'inline-block', minWidth: 32, textAlign: 'center', color: COLORS.yellow, scale: scoringTeam === 'home' ? numScale : 1}}>{homeDisplay}</span>
         <span style={{opacity: 0.6}}>-</span>
         <span style={{display: 'inline-block', minWidth: 32, textAlign: 'center', color: COLORS.yellow, scale: scoringTeam === 'away' ? numScale : 1}}>{awayDisplay}</span>
-        <span>{awayTeam}</span>
+        <TeamMark code={awayTeam} badge={awayBadge} color={awayColor} />
       </Interactive.Div>
     </AbsoluteFill>
   );

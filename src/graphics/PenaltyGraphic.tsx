@@ -1,6 +1,7 @@
 import React from 'react';
 import {AbsoluteFill, Easing, Img, Interactive, interpolate, staticFile, useCurrentFrame} from 'remotion';
-import {Banner, COLORS, Scoreboard, TitlePill} from './shared';
+import {usePitchSize} from '../PitchSizeContext';
+import {Banner, COLORS, Scoreboard, SCORE_PILL_BOTTOM, TitlePill} from './shared';
 
 type PenaltyOutcome = 'scored' | 'saved' | 'post' | 'out';
 
@@ -11,31 +12,40 @@ type PenaltyGraphicProps = {
   homeScore: number;
   awayScore: number;
   scoringTeam: 'home' | 'away';
+  homeBadge?: string | null;
+  awayBadge?: string | null;
+  homeColor?: string | null;
+  awayColor?: string | null;
 };
 
-// The goal (net.png) box in composition space (1080x1080), plus the derived
-// landmarks the ball aims at. net.png is a square canvas with the goal drawn
-// across the middle, so the mouth sits well inside the box.
-const GOAL_BOX = {left: 260, top: 160, size: 560};
-const GOAL = {
-  cx: 540,
-  cy: 470, // centre of the goal mouth
-  postR: 725, // right upright
-};
-const SPOT = {x: 540, y: 872}; // penalty spot / ball start
+// The goal (net.png), ball spot and trajectory landmarks, as fractions of the
+// pitch region (x as a fraction of width, y as a fraction of height) rather
+// than fixed pixels — resolved via usePitchSize() (the pitch's own size,
+// not necessarily the full composition — Ballsy's cam takes some of it).
+// Originally tuned by eye on a 1080x1080 canvas; every fraction below is
+// that original pixel value divided by 1080 on both axes, so this preserves
+// the exact composition that was already tuned, just resolved against
+// whatever the real canvas size is (including a taller 1080x1920 one).
+const GOAL_BOX_FRAC = {left: 260 / 1080, top: 160 / 1080, size: 560 / 1080};
+const GOAL_FRAC = {cx: 540 / 1080, cy: 470 / 1080, postR: 725 / 1080};
+const SPOT_FRAC = {x: 540 / 1080, y: 872 / 1080};
 
-// Ball trajectory per outcome: keyframe frames + x/y of the ball centre.
-// A real penalty strike reaches the goal in well under a second — keep the
-// flight fast and punchy rather than a slow drift. Middle keyframes are
-// spaced proportionally to the distance they cover (not evenly in time), so
-// linear interpolation reads as one continuous speed instead of visibly
+// Ball trajectory per outcome: keyframe frames + x/y fractions of the ball
+// centre. A real penalty strike reaches the goal in well under a second —
+// keep the flight fast and punchy rather than a slow drift. Middle keyframes
+// are spaced proportionally to the distance they cover (not evenly in time),
+// so linear interpolation reads as one continuous speed instead of visibly
 // slowing down mid-flight at each waypoint.
-const PATHS: Record<PenaltyOutcome, {frames: number[]; xs: number[]; ys: number[]}> = {
+const PATHS_FRAC: Record<PenaltyOutcome, {frames: number[]; xs: number[]; ys: number[]}> = {
   // Straight line, a single segment — nothing to desync, so it's always constant speed.
-  scored: {frames: [6, 26], xs: [SPOT.x, GOAL.cx], ys: [SPOT.y, GOAL.cy]},
-  saved: {frames: [6, 19, 24], xs: [SPOT.x, 540, 540], ys: [SPOT.y, 600, 500]},
-  post: {frames: [6, 16, 19, 26], xs: [SPOT.x, 690, GOAL.postR, 910], ys: [SPOT.y, 480, 360, 560]},
-  out: {frames: [6, 17, 24], xs: [SPOT.x, 552, 600], ys: [SPOT.y, 340, 40]},
+  scored: {frames: [6, 26], xs: [SPOT_FRAC.x, GOAL_FRAC.cx], ys: [SPOT_FRAC.y, GOAL_FRAC.cy]},
+  saved: {frames: [6, 19, 24], xs: [SPOT_FRAC.x, 540 / 1080, 540 / 1080], ys: [SPOT_FRAC.y, 600 / 1080, 500 / 1080]},
+  post: {
+    frames: [6, 16, 19, 26],
+    xs: [SPOT_FRAC.x, 690 / 1080, GOAL_FRAC.postR, 910 / 1080],
+    ys: [SPOT_FRAC.y, 480 / 1080, 360 / 1080, 560 / 1080],
+  },
+  out: {frames: [6, 17, 24], xs: [SPOT_FRAC.x, 552 / 1080, 600 / 1080], ys: [SPOT_FRAC.y, 340 / 1080, 40 / 1080]},
 };
 
 export const PenaltyGraphic: React.FC<PenaltyGraphicProps> = ({
@@ -45,9 +55,23 @@ export const PenaltyGraphic: React.FC<PenaltyGraphicProps> = ({
   homeScore,
   awayScore,
   scoringTeam,
+  homeBadge,
+  awayBadge,
+  homeColor,
+  awayColor,
 }) => {
   const frame = useCurrentFrame();
-  const path = PATHS[outcome];
+  const {width, height} = usePitchSize();
+
+  const GOAL_BOX = {left: GOAL_BOX_FRAC.left * width, top: GOAL_BOX_FRAC.top * height, size: GOAL_BOX_FRAC.size * width};
+  const GOAL = {cx: GOAL_FRAC.cx * width, cy: GOAL_FRAC.cy * height, postR: GOAL_FRAC.postR * width};
+
+  const pathFrac = PATHS_FRAC[outcome];
+  const path = {
+    frames: pathFrac.frames,
+    xs: pathFrac.xs.map((x) => x * width),
+    ys: pathFrac.ys.map((y) => y * height),
+  };
 
   // Linear between keyframes so the ball never decelerates to a stop mid-flight.
   const ballX = interpolate(frame, path.frames, path.xs, {
@@ -128,7 +152,7 @@ export const PenaltyGraphic: React.FC<PenaltyGraphicProps> = ({
           style={{
             position: 'absolute',
             left: GOAL.postR,
-            top: 360,
+            top: 360 / 1080 * height,
             translate: '-50% -50%',
             width: 60,
             height: 60,
@@ -192,7 +216,7 @@ export const PenaltyGraphic: React.FC<PenaltyGraphicProps> = ({
           name="Scoreboard"
           style={{
             position: 'absolute',
-            bottom: '9%',
+            bottom: SCORE_PILL_BOTTOM,
             left: '50%',
             translate: '-50%',
             scale: bannerReveal,
@@ -206,6 +230,10 @@ export const PenaltyGraphic: React.FC<PenaltyGraphicProps> = ({
             scoringTeam={scoringTeam}
             frame={frame}
             tickStart={30}
+            homeBadge={homeBadge}
+            awayBadge={awayBadge}
+            homeColor={homeColor}
+            awayColor={awayColor}
           />
         </Interactive.Div>
       )}

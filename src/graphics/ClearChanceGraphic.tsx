@@ -1,35 +1,52 @@
 import React from 'react';
 import {AbsoluteFill, Easing, Img, Interactive, interpolate, staticFile, useCurrentFrame} from 'remotion';
+import {usePitchSize} from '../PitchSizeContext';
 import {Banner, COLORS, TitlePill} from './shared';
 
 type ClearChanceGraphicProps = {
   outcome: 'post' | 'wide';
 };
 
-// net.png box + landmarks in composition space (1080x1080).
-const GOAL_BOX = {left: 260, top: 150, size: 560};
-const RIGHT_POST = {x: 725, y: 360};
+// net.png box + landmarks, as fractions of the composition (x as a fraction
+// of width, y as a fraction of height) rather than fixed pixels — resolved
+// against the real canvas size inside the component (useVideoConfig), same
+// pattern ballsy.tsx uses for the avatar. Originally tuned by eye on a
+// 1080x1080 canvas; every fraction below is that original pixel value
+// divided by 1080 on both axes.
+const GOAL_BOX_FRAC = {left: 260 / 1080, top: 150 / 1080, size: 560 / 1080};
+const RIGHT_POST_FRAC = {x: 725 / 1080, y: 360 / 1080};
 
-// Ball trajectory keyframes per outcome. Kept fast/punchy like a real strike
-// rather than a slow drift. Middle keyframes are spaced proportionally to the
-// distance they cover (not evenly in time), so linear interpolation reads as
-// one continuous speed instead of visibly slowing down at each waypoint.
-const PATHS = {
+// Ball trajectory keyframes per outcome, as fractions. Kept fast/punchy like
+// a real strike rather than a slow drift. Middle keyframes are spaced
+// proportionally to the distance they cover (not evenly in time), so linear
+// interpolation reads as one continuous speed instead of visibly slowing
+// down at each waypoint.
+const PATHS_FRAC = {
   post: {
     frames: [6, 16, 23, 25, 33],
-    xs: [300, 520, 690, RIGHT_POST.x, 900],
-    ys: [910, 620, 420, RIGHT_POST.y, 560],
+    xs: [300 / 1080, 520 / 1080, 690 / 1080, RIGHT_POST_FRAC.x, 900 / 1080],
+    ys: [910 / 1080, 620 / 1080, 420 / 1080, RIGHT_POST_FRAC.y, 560 / 1080],
   },
   wide: {
     frames: [6, 18, 27, 34],
-    xs: [300, 560, 820, 990],
-    ys: [910, 560, 330, 150],
+    xs: [300 / 1080, 560 / 1080, 820 / 1080, 990 / 1080],
+    ys: [910 / 1080, 560 / 1080, 330 / 1080, 150 / 1080],
   },
 } as const;
 
 export const ClearChanceGraphic: React.FC<ClearChanceGraphicProps> = ({outcome}) => {
   const frame = useCurrentFrame();
-  const path = PATHS[outcome];
+  const {width, height} = usePitchSize();
+
+  const GOAL_BOX = {left: GOAL_BOX_FRAC.left * width, top: GOAL_BOX_FRAC.top * height, size: GOAL_BOX_FRAC.size * width};
+  const RIGHT_POST = {x: RIGHT_POST_FRAC.x * width, y: RIGHT_POST_FRAC.y * height};
+
+  const pathFrac = PATHS_FRAC[outcome];
+  const path = {
+    frames: pathFrac.frames,
+    xs: pathFrac.xs.map((x) => x * width),
+    ys: pathFrac.ys.map((y) => y * height),
+  };
 
   // Linear between keyframes so the ball keeps moving continuously (no stops).
   const ballX = interpolate(frame, [...path.frames], [...path.xs], {
@@ -83,7 +100,7 @@ export const ClearChanceGraphic: React.FC<ClearChanceGraphicProps> = ({outcome})
       </Interactive.Div>
 
       {/* Dotted trajectory: black underlay + white dots so it reads on any bg */}
-      <svg width="100%" height="100%" viewBox="0 0 1080 1080" style={{position: 'absolute', inset: 0}}>
+      <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} style={{position: 'absolute', inset: 0}}>
         <polyline points={points} fill="none" stroke="black" strokeWidth={22} strokeLinecap="round" strokeDasharray="2 30" opacity={pathOpacity} />
         <polyline points={points} fill="none" stroke="white" strokeWidth={12} strokeLinecap="round" strokeDasharray="2 30" opacity={pathOpacity} />
         {outcome === 'post' && impact > 0 && (

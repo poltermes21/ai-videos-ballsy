@@ -9,7 +9,7 @@ import {captionFontFamily} from './fonts';
 // word-by-word; higher = more words visible at once.
 const SWITCH_CAPTIONS_EVERY_MS = 1200;
 
-const CaptionPage: React.FC<{page: TikTokPage}> = ({page}) => {
+const CaptionPage: React.FC<{page: TikTokPage; bottomFraction: number}> = ({page, bottomFraction}) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
 
@@ -19,20 +19,36 @@ const CaptionPage: React.FC<{page: TikTokPage}> = ({page}) => {
   const absoluteTimeMs = page.startMs + currentTimeMs;
 
   return (
-    <AbsoluteFill style={{justifyContent: 'flex-end', alignItems: 'center', paddingBottom: '4%'}}>
+    // Bottom-anchored (not top-anchored) at the live cam/pitch boundary
+    // (bottomFraction, computed per-frame in ballsy.tsx) so the box grows
+    // UPWARD from that line — staying inside the cam, right below Ballsy,
+    // instead of hanging down into the pitch where it can cover a graphic's
+    // own title pill (e.g. the "PENALTY" tag). Just below Ballsy once the
+    // cam goes fullscreen too, always clear of the YouTube Shorts/TikTok UI
+    // reserved at the very bottom of the frame.
+    <div
+      style={{
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: `${bottomFraction * 100}%`,
+        display: 'flex',
+        justifyContent: 'center',
+      }}
+    >
       <div
         style={{
-          maxWidth: '86%',
+          maxWidth: '90%',
           textAlign: 'center',
           background: 'rgba(0,0,0,0.55)',
-          borderRadius: 16,
-          padding: '10px 26px',
+          borderRadius: 20,
+          padding: '14px 30px',
           fontFamily: captionFontFamily,
-          fontSize: 40,
+          fontSize: 54,
           lineHeight: 1.25,
           letterSpacing: 0.5,
           color: 'white',
-          WebkitTextStroke: '1.5px black',
+          WebkitTextStroke: '2px black',
           whiteSpace: 'pre-wrap',
         }}
       >
@@ -45,11 +61,11 @@ const CaptionPage: React.FC<{page: TikTokPage}> = ({page}) => {
           );
         })}
       </div>
-    </AbsoluteFill>
+    </div>
   );
 };
 
-export const Captions: React.FC<{captions: Caption[]}> = ({captions}) => {
+export const Captions: React.FC<{captions: Caption[]; bottomFraction: number}> = ({captions, bottomFraction}) => {
   const {fps} = useVideoConfig();
 
   const {pages} = useMemo(
@@ -73,7 +89,7 @@ export const Captions: React.FC<{captions: Caption[]}> = ({captions}) => {
 
         return (
           <Sequence key={index} from={Math.round(startFrame)} durationInFrames={durationInFrames}>
-            <CaptionPage page={page} />
+            <CaptionPage page={page} bottomFraction={bottomFraction} />
           </Sequence>
         );
       })}
