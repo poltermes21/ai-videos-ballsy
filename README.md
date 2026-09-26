@@ -1,8 +1,16 @@
 # Ballsy
 
-Ballsy turns a real football match into a short recap video narrated by an
-animated cartoon-ball mascot — pick a match, review the script it writes,
-generate the voiceover, and render the final `.mp4`.
+Ballsy turns real football data into short vertical videos narrated by an
+animated cartoon-ball mascot. Three video types, one pipeline: pick a match,
+a player, or an upcoming fixture; review the script it writes; generate the
+voiceover; render the final `.mp4`.
+
+- **Match recap** — a real match's events, narrated as a commentator would.
+- **Player form check** — is a real player hot or cold right now, grounded
+  in his SofaScore stats.
+- **Pre-match preview** — how two teams arrive at an upcoming fixture (form,
+  table, head-to-head, streaks, team news), capped off with Ballsy's own
+  opinion-framed prediction.
 
 ## Why it's built this way
 
@@ -10,9 +18,8 @@ generate the voiceover, and render the final `.mp4`.
 exactly two places — an LLM writes the commentary script, and a TTS model
 voices it. Everything else (the mascot's lip-sync, expressions, event
 graphics, captions, camera/avatar movement) is deterministic React/Remotion
-rendering driven by real match data. That's a deliberate choice: generative
-video is non-deterministic (the mascot would look different every episode)
-and can't legally depict real players, faces, or broadcast footage.
+rendering driven by real data. That's a deliberate choice: generative video
+is non-deterministic (the mascot would look different every episode).
 
 **The agent is a commentator, not a data narrator.** It's instructed to
 decide what's worth telling — a routine 20th-minute yellow card gets skipped;
@@ -21,18 +28,20 @@ xG, possession) when there's a genuinely notable gap, the way an actual fan
 recapping the match would, not a stats bot.
 
 **Legal/content constraints that shaped the design:**
-- No real player faces, likenesses, or broadcast footage — every graphic is
-  generic (the ball, a scoreboard, a card, a substitution arrow).
-- The mascot is deliberately stylised/cartoonish, not a realistic avatar —
-  keeps it clear of synthetic-media disclosure rules aimed at realistic
-  AI-generated people.
-- Controversy commentary is always framed as opinion ("for me...", "looked
-  soft...") — never as a factual claim about a real person.
+- No broadcast footage, and no invented/fabricated depiction of a real
+  person. Real team badges/colours and a real SofaScore player photo **are**
+  used — a deliberate, informed choice, treated to match the show's
+  flat-cartoon visual system (thick outline, drop shadow) rather than
+  dropped in as a raw photo.
+- The mascot itself stays stylised/cartoonish, not a realistic avatar.
+- Controversy commentary and the pre-match prediction are always framed as
+  opinion ("for me...", "I'm backing...") — never as a factual claim about a
+  real person or a future result.
 
 ## How it works
 
 ```
-Pick a match (SofaScore)
+Pick a match / player / fixture (SofaScore)
         │
         ▼
 Anthropic writes the script  ──▶  you review it (edit inline if needed)
@@ -45,10 +54,18 @@ ElevenLabs voices it  ──▶  Rhubarb lip-sync + expression timing + event
 Remotion renders the final .mp4 (Rive drives the mascot's face)
 ```
 
-Every step after the script is grounded in the same two sources: the exact
-script text (for captions/timing) and SofaScore's structured match data (for
-which graphic shows when, and with which score/players). Nothing is
-transcribed or guessed after the fact.
+All three video types share this exact chain — same 5-block script shape,
+same lip-sync/expression/avatar/caption steps — only the data source and the
+on-screen graphics differ. Every step after the script is grounded in the
+exact script text (for captions/timing) and SofaScore's structured data
+(which graphic shows when, with which numbers). Nothing is transcribed or
+guessed after the fact.
+
+**Videos, not files.** A match, a player, or a fixture can have any number
+of generated videos — a different focus each time (e.g. "the renewal talk
+around Raphinha"), or the same focus kept as a new version instead of
+overwriting one you already approved. Each is its own script/audio/render;
+none of them silently replace one another.
 
 ## Prerequisites
 
@@ -78,29 +95,39 @@ pip install -r requirements.txt
 
 ### Ballsy Studio (recommended)
 
-A local web app that walks through the whole flow — pick a league, a season,
-a matchday, then a match; it shows you the match report (score, timeline,
-stats) before you spend anything; generates and lets you edit the script;
-then runs the rest of the pipeline and renders the video.
+A local web app that walks through the whole flow for all three video types.
 
 ```bash
 npm run selector
 ```
 
-Open **http://localhost:4321**. The **History** tab lists every match
-you've generated a script for, with its status (script reviewed? audio
-generated? video rendered?) and picks up exactly where you left off.
+Open **http://localhost:4321**. **New match** / **New player** / **New
+preview** each start their own kind of video — a league/season/matchday
+picker, a player-name search, or two team-name searches respectively — and
+show you the free report (score, form, table, h2h) before you spend
+anything on a script.
+
+**Every entity's own page** (a match, a player, or a fixture) lists all the
+videos generated for it so far, with a button to start another one — an
+optional focus prompt, or none for the default take. Generating with a
+focus that already has a video offers a choice instead of silently
+overwriting it: keep both (a new version) or replace it.
+
+**History** lists every video ever generated, across all three kinds, with
+tabs to filter by kind, a status filter, search, and videos grouped under
+the match/player/fixture they belong to — so "what do I have for this
+match?" is one glance.
 
 ### Manual pipeline (CLI)
 
-Useful for scripting or debugging a single step in isolation. `<id>` is a
-SofaScore match id (found via the Studio's match picker, or SofaScore's own
-site).
+Useful for scripting or debugging a single step in isolation. This covers
+the match-recap path; player and pre-match videos take extra arguments
+(competitions, team ids) that are easier to drive from the Studio.
 
 ```bash
-node --env-file=.env scripts/generate-script.mjs <id>      # paid (Anthropic)
-node scripts/review-script.mjs <id>                        # approve/reject in terminal
-node --env-file=.env scripts/generate-audio.mjs <id>        # paid (ElevenLabs)
+node --env-file=.env scripts/generate-script.mjs <id> [focus]  # paid (Anthropic)
+node scripts/review-script.mjs <id>                            # approve/reject in terminal
+node --env-file=.env scripts/generate-audio.mjs <id>            # paid (ElevenLabs)
 node scripts/generate-visemes.mjs <id>
 node scripts/generate-expressions.mjs <id>
 node scripts/generate-graphics-timeline.mjs <id>
@@ -108,47 +135,60 @@ node scripts/generate-avatar-timeline.mjs <id>
 node scripts/generate-captions.mjs <id>
 
 npx remotion studio                                         # live preview
-npx remotion render Ballsy out/<id>.mp4 --concurrency=1      # final render
+npx remotion render Ballsy out/matches/.../<id>.mp4 --concurrency=1  # final render
 ```
 
-`--concurrency=1` matters: without it, Remotion's parallel rendering can make
-the mascot's idle animation stutter at the seams between processes. Ballsy
-Studio's render step already sets this for you.
+`<id>` is a SofaScore match id with no focus, or `<id>-<focus-slug>` for a
+focused run — see `scripts/lib/run-paths.mjs`. `--concurrency=1` matters:
+without it, Remotion's parallel rendering can make the mascot's idle
+animation stutter at the seams between processes. Ballsy Studio's render
+step already sets this for you.
 
 ## Project structure
 
 ```
-src/                       Remotion composition (the video itself)
-  ballsy.tsx                the mascot: drives Rive per-frame, lays out graphics/captions
-  graphics/                 one component per event type (goal, card, penalty, ...)
+src/                       Remotion compositions (the videos themselves)
+  BallsyCam.tsx              the mascot's cam — Rive drive, cam-height mechanic,
+                             captions; shared verbatim by all three compositions
+  ballsy.tsx                 match recap composition (the pitch below the cam)
+  ballsyPlayer.tsx            player form-check composition (stat cards)
+  ballsyPrematch.tsx          pre-match preview composition (compare cards)
+  CoverCard.tsx, PlayerCoverCard.tsx   opening title cards
+  PitchSizeContext.tsx        tells pixel-math graphics the size of their layer
+  graphics/                   one component per on-screen graphic (event,
+                               stat-card, pre-match-compare — ~20 total)
   Background.tsx, Captions.tsx, fonts.ts
 
 scripts/                   the data/generation pipeline (run outside Remotion)
-  generate-script.mjs        SofaScore data + article context → Anthropic → script JSON
-  generate-audio.mjs          script → ElevenLabs → audio + per-character alignment
-  generate-visemes.mjs        audio → Rhubarb → mouth-shape timeline
-  generate-expressions.mjs    alignment → expression timeline
-  generate-graphics-timeline.mjs   script events + real match data → on-screen graphics timeline
-  generate-avatar-timeline.mjs     script structure → mascot position/scale keyframes
-  generate-captions.mjs       alignment → word-level captions
-  review-script.mjs           terminal script approve/reject
-  sofascore/                  Python sidecar — the only thing that talks to SofaScore
-  lib/                        shared Node helpers (match data, script timing, HTTP, Firecrawl)
-  server/                     Ballsy Studio — the web app described above
+  generate-script.mjs                match script: SofaScore + article context → Anthropic
+  generate-player-script.mjs          player form-check script
+  generate-prematch-script.mjs        pre-match preview script
+  generate-audio.mjs                  script → ElevenLabs → audio + alignment
+  generate-visemes.mjs                audio → Rhubarb → mouth-shape timeline
+  generate-expressions.mjs            alignment → expression timeline
+  generate-graphics-timeline.mjs      match script → on-screen event graphics timeline
+  generate-player-timeline.mjs        player script → stat-card timeline
+  generate-prematch-timeline.mjs      preview script → compare-card timeline
+  generate-avatar-timeline.mjs        script structure → mascot position/scale keyframes
+  generate-captions.mjs               alignment → word-level captions
+  review-script.mjs                   terminal script approve/reject
+  sofascore/                          Python sidecar — the only thing that talks to SofaScore
+  lib/                                shared Node helpers (match/player/prematch data,
+                                       run-paths.mjs, script timing, HTTP, Firecrawl)
+  server/                             Ballsy Studio — the web app described above
+    index.mjs, player.mjs, prematch.mjs   routes per video kind
+    run-ref.mjs, runs-admin.mjs, video-paths.mjs   shared run resolver, rename/delete, video paths
+    publish-youtube.mjs, publish-tiktok.mjs         publishing, any video kind
+    src/                                 no-framework TypeScript frontend
 ```
-
-## Status
-
-The build order described in earlier project notes is complete: match data
-→ script → audio/lip-sync → event graphics → the Ballsy Studio picker/review/
-render UI.
 
 ## Publishing to TikTok (optional)
 
-Once a match has a rendered video, its page in Ballsy Studio shows a **TikTok**
-block that can post the `.mp4` straight to your account. It's entirely
-optional — skip this whole section and everything else still works; you just
-download the file and upload it by hand.
+Once a video (a match recap, a player video, or a preview) is rendered, its
+page in Ballsy Studio shows a **TikTok** block that can post the `.mp4`
+straight to your account. It's entirely optional — skip this whole section
+and everything else still works; you just download the file and upload it
+by hand.
 
 > ### ⚠️ Videos publish as **private (self-only)**, and that is not a setting
 >
@@ -192,9 +232,9 @@ not a toggle — the script is written by an LLM and the voice is synthetic.
    TIKTOK_CLIENT_SECRET=your_client_secret
    ```
 
-7. Restart `npm run selector`, open a match that already has a rendered video,
-   and click **Connect TikTok** in the TikTok block. You'll approve access on
-   TikTok's site and get dropped back on the match page.
+7. Restart `npm run selector`, open a video that already has a render, and
+   click **Connect TikTok** in the TikTok block. You'll approve access on
+   TikTok's site and get dropped back on that video's page.
 
 The refresh token is stored in `scripts/server/.credentials/tiktok.json`, which
 is gitignored — it's a real credential for your account, so don't commit it or
@@ -206,8 +246,8 @@ Click **Publish to TikTok**. The caption is the `title` + `hashtags` that were
 generated alongside the script (TikTok has no separate description field, so
 the hashtags ride along in the caption); the video uploads in chunks and the
 page streams progress, then waits for TikTok to finish processing before it
-reports success. The result is recorded in `scripts/output/<id>.json` under
-`tiktok`, so History and the match page both show the match as published.
+reports success. The result is recorded next to that video's own script, so
+History and the video's page both show it as published.
 
 There's no public watch link, even after a successful publish: the Content
 Posting API doesn't return one, and for a self-only post there isn't a public
@@ -215,10 +255,11 @@ URL to return. Open the TikTok app to see the video.
 
 ## Publishing to YouTube (optional)
 
-Once a match has a rendered video, its page in Ballsy Studio shows a
-**YouTube** block that uploads the `.mp4` straight to your channel. Optional
-like the TikTok block — skip this section and everything else still works, you
-just download the file and upload it yourself.
+Once a video is rendered, its page in Ballsy Studio shows a **YouTube** block
+that uploads the `.mp4` straight to your channel — a match recap, a player
+video, or a preview, all the same way. Optional like the TikTok block — skip
+this section and everything else still works, you just download the file and
+upload it yourself.
 
 Every upload is disclosed to YouTube as **altered or synthetic media**
 (`status.containsSyntheticMedia: true`) on every publish. That's a standing
@@ -259,10 +300,10 @@ The API is free, but it needs your own OAuth client. Roughly five minutes:
    YOUTUBE_CLIENT_SECRET=your_client_secret
    ```
 
-6. Restart `npm run selector`, open a match that already has a rendered video,
-   and click **Connect YouTube**. You'll approve access on Google's screen
+6. Restart `npm run selector`, open a video that already has a render, and
+   click **Connect YouTube**. You'll approve access on Google's screen
    (it warns the app isn't verified — expected for a Testing-mode app you own)
-   and land back on the match page.
+   and land back on that video's page.
 
 Ballsy only ever asks for the `youtube.upload` scope, so it can add a video to
 the channel and nothing else — it cannot read, edit, or delete anything already
@@ -284,6 +325,6 @@ Then click **Publish to YouTube** and confirm. Title, description and hashtags
 come from the `publishMetadata` generated alongside the script; the page
 streams upload progress and then shows the watch link.
 
-The result is recorded in `scripts/output/<id>.json` under `youtube`, so
-History and the match page both show the match as published — and the block
-turns into that link instead of offering to upload a second copy.
+The result is recorded next to that video's own script, so History and the
+video's page both show it as published — and the block turns into that link
+instead of offering to upload a second copy.
